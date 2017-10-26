@@ -39,7 +39,7 @@ DynamicLibrary::DynamicLibrary (const char* fileName)
 
 DynamicLibrary::~DynamicLibrary (void)
 {
-	deDynamicLibrary_close(m_library);
+	// deDynamicLibrary_close(m_library);
 }
 
 } // de
