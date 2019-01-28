@@ -11,9 +11,14 @@ namespace tcu {
   class MyglDisplay: public eglu::NativeDisplay {
   public:
     MyglDisplay(): eglu::NativeDisplay(CAPABILITY_GET_DISPLAY_LEGACY),
-      library("libmygl.dylib") {
-
-    }
+#if DE_OS == DE_OS_OSX
+      library("libmygl.dylib")
+#elif DE_OS == DE_OS_UNIX
+      library("libmygl.so")
+#else
+#error Need to define filename for platform
+#endif
+    {}
 
     const eglw::Library& getLibrary (void) const {
       return library;
