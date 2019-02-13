@@ -306,7 +306,7 @@ Move<VkImage> makeImage (const DeviceInterface& vk, VkDevice device, VkDeviceSiz
 {
 	const VkDeviceSize					sizeInPixels					= (size + 3u) / 4u;
 	const deUint32						sqrtSize						= static_cast<deUint32>(deFloatCeil(deFloatSqrt(static_cast<float>(sizeInPixels))));
-	const deUint32						powerOfTwoSize					= deMaxu32(deSmallestGreaterOrEquallPowerOfTwoU32(sqrtSize), 4096u);
+	const deUint32						powerOfTwoSize					= deSmallestGreaterOrEquallPowerOfTwoU32(sqrtSize);
 	const VkImageCreateInfo				colorImageParams				=
 	{
 		VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,							// VkStructureType			sType;
@@ -351,54 +351,54 @@ Move<VkBuffer> makeBuffer(const DeviceInterface& vk, VkDevice device, VkDeviceSi
 
 VkMemoryRequirements getImageMemoryRequirements(const DeviceInterface& vk, VkDevice device, Move<VkImage>& image)
 {
-	VkImageMemoryRequirementsInfo2KHR	info							=
+	VkImageMemoryRequirementsInfo2	info								=
 	{
-		VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2_KHR,			// VkStructureType			sType
+		VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,				// VkStructureType			sType
 		DE_NULL,														// const void*				pNext
 		*image															// VkImage					image
 	};
-	VkMemoryDedicatedRequirementsKHR	dedicatedRequirements			=
+	VkMemoryDedicatedRequirements	dedicatedRequirements				=
 	{
-		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS_KHR,			// VkStructureType			sType
+		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS,				// VkStructureType			sType
 		DE_NULL,														// const void*				pNext
 		VK_FALSE,														// VkBool32					prefersDedicatedAllocation
 		VK_FALSE														// VkBool32					requiresDedicatedAllocation
 	};
-	VkMemoryRequirements2KHR			req2							=
+	VkMemoryRequirements2			req2								=
 	{
-		VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2_KHR,					// VkStructureType			sType
+		VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,						// VkStructureType			sType
 		&dedicatedRequirements,											// void*					pNext
 		{0, 0, 0}														// VkMemoryRequirements		memoryRequirements
 	};
 
-	vk.getImageMemoryRequirements2KHR(device, &info, &req2);
+	vk.getImageMemoryRequirements2(device, &info, &req2);
 
 	return req2.memoryRequirements;
 }
 
 VkMemoryRequirements getBufferMemoryRequirements(const DeviceInterface& vk, VkDevice device, Move<VkBuffer>& buffer)
 {
-	VkBufferMemoryRequirementsInfo2KHR	info							=
+	VkBufferMemoryRequirementsInfo2	info								=
 	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2_KHR,		// VkStructureType			sType
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,			// VkStructureType			sType
 		DE_NULL,														// const void*				pNext
 		*buffer															// VkImage					image
 	};
-	VkMemoryDedicatedRequirementsKHR	dedicatedRequirements			=
+	VkMemoryDedicatedRequirements	dedicatedRequirements				=
 	{
-		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS_KHR,			// VkStructureType			sType
+		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS,				// VkStructureType			sType
 		DE_NULL,														// const void*				pNext
 		VK_FALSE,														// VkBool32					prefersDedicatedAllocation
 		VK_FALSE														// VkBool32					requiresDedicatedAllocation
 	};
-	VkMemoryRequirements2KHR			req2							=
+	VkMemoryRequirements2			req2								=
 	{
-		VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2_KHR,				// VkStructureType		sType
-		&dedicatedRequirements,										// void*				pNext
-		{0, 0, 0}													// VkMemoryRequirements	memoryRequirements
+		VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,						// VkStructureType		sType
+		&dedicatedRequirements,											// void*				pNext
+		{0, 0, 0}														// VkMemoryRequirements	memoryRequirements
 	};
 
-	vk.getBufferMemoryRequirements2KHR(device, &info, &req2);
+	vk.getBufferMemoryRequirements2(device, &info, &req2);
 
 	return req2.memoryRequirements;
 }
@@ -419,7 +419,7 @@ Move<VkDeviceMemory> allocMemory (const DeviceInterface& vk, VkDevice device, Vk
 {
 	DE_ASSERT((!image) || (!buffer));
 
-	const VkMemoryDedicatedAllocateInfoKHR
+	const VkMemoryDedicatedAllocateInfo
 										dedicatedAllocateInfo			=
 	{
 		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR,			// VkStructureType		sType
@@ -528,17 +528,14 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 	const InstanceInterface&				vki							= context.getInstanceInterface();
 	const DeviceInterface&					vkd							= context.getDeviceInterface();
 	const VkPhysicalDeviceMemoryProperties	memoryProperties			= getPhysicalDeviceMemoryProperties(vki, physicalDevice);
-	// \todo [2016-05-27 misojarvi] Remove once drivers start reporting correctly nonCoherentAtomSize that is at least 1.
-	const VkDeviceSize						nonCoherentAtomSize			= context.getDeviceProperties().limits.nonCoherentAtomSize != 0
-																		? context.getDeviceProperties().limits.nonCoherentAtomSize
-																		: 1;
+	const VkDeviceSize						nonCoherentAtomSize			= context.getDeviceProperties().limits.nonCoherentAtomSize;
 	const deUint32							queueFamilyIndex			= context.getUniversalQueueFamilyIndex();
 
 	if (config.allocationKind == ALLOCATION_KIND_DEDICATED_IMAGE
 	||	config.allocationKind == ALLOCATION_KIND_DEDICATED_BUFFER)
 	{
 		const std::vector<std::string>&		extensions					= context.getDeviceExtensions();
-		const deBool						isSupported					= std::find(extensions.begin(), extensions.end(), "VK_KHR_dedicated_allocation") != extensions.end();
+		const deBool						isSupported					= isDeviceExtensionSupported(context.getUsedApiVersion(), extensions, "VK_KHR_dedicated_allocation");
 		if (!isSupported)
 		{
 			TCU_THROW(NotSupportedError, "Not supported");
@@ -549,15 +546,15 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 		const tcu::ScopedLogSection	section	(log, "TestCaseInfo", "TestCaseInfo");
 
 		log << TestLog::Message << "Seed: " << config.seed << TestLog::EndMessage;
-		log << TestLog::Message << "Allocation size: " << config.allocationSize << " * atom" <<  TestLog::EndMessage;
-		log << TestLog::Message << "Mapping, offset: " << config.mapping.offset << " * atom, size: " << config.mapping.size << " * atom" << TestLog::EndMessage;
+		log << TestLog::Message << "Allocation size: " << config.allocationSize  <<  TestLog::EndMessage;
+		log << TestLog::Message << "Mapping, offset: " << config.mapping.offset << ", size: " << config.mapping.size << TestLog::EndMessage;
 
 		if (!config.flushMappings.empty())
 		{
 			log << TestLog::Message << "Invalidating following ranges:" << TestLog::EndMessage;
 
 			for (size_t ndx = 0; ndx < config.flushMappings.size(); ndx++)
-				log << TestLog::Message << "\tOffset: " << config.flushMappings[ndx].offset << " * atom, Size: " << config.flushMappings[ndx].size << " * atom" << TestLog::EndMessage;
+				log << TestLog::Message << "\tOffset: " << config.flushMappings[ndx].offset << ", Size: " << config.flushMappings[ndx].size << TestLog::EndMessage;
 		}
 
 		if (config.remap)
@@ -568,7 +565,7 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 			log << TestLog::Message << "Flushing following ranges:" << TestLog::EndMessage;
 
 			for (size_t ndx = 0; ndx < config.invalidateMappings.size(); ndx++)
-				log << TestLog::Message << "\tOffset: " << config.invalidateMappings[ndx].offset << " * atom, Size: " << config.invalidateMappings[ndx].size << " * atom" << TestLog::EndMessage;
+				log << TestLog::Message << "\tOffset: " << config.invalidateMappings[ndx].offset << ", Size: " << config.invalidateMappings[ndx].size << TestLog::EndMessage;
 		}
 	}
 
@@ -579,11 +576,9 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 			const tcu::ScopedLogSection		section		(log, "MemoryType" + de::toString(memoryTypeIndex), "MemoryType" + de::toString(memoryTypeIndex));
 			const vk::VkMemoryType&			memoryType	= memoryProperties.memoryTypes[memoryTypeIndex];
 			const VkMemoryHeap&				memoryHeap	= memoryProperties.memoryHeaps[memoryType.heapIndex];
-			const VkDeviceSize				atomSize	= (memoryType.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0
-														? 1
-														: nonCoherentAtomSize;
+			const VkDeviceSize				atomSize	= nonCoherentAtomSize;
 
-			VkDeviceSize					allocationSize				= config.allocationSize * atomSize;
+			VkDeviceSize					allocationSize				= (config.allocationSize % atomSize == 0) ? config.allocationSize : config.allocationSize + (atomSize - (config.allocationSize % atomSize));
 			vk::VkMemoryRequirements		req							=
 			{
 				(VkDeviceSize)allocationSize,
@@ -604,8 +599,8 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 				req = getBufferMemoryRequirements(vkd, device, buffer);
 			}
 			allocationSize = req.size;
-			VkDeviceSize					mappingSize					= config.mapping.size * atomSize;
-			VkDeviceSize					mappingOffset				= config.mapping.offset * atomSize;
+			VkDeviceSize					mappingSize					=  (config.mapping.size % atomSize == 0) ? config.mapping.size : config.mapping.size + (atomSize - (config.mapping.size % atomSize));
+			VkDeviceSize					mappingOffset				=  (config.mapping.offset % atomSize == 0) ? config.mapping.offset : config.mapping.offset - (config.mapping.offset % atomSize);
 			if (config.mapping.size == config.allocationSize && config.mapping.offset == 0u)
 			{
 				mappingSize = allocationSize;
@@ -634,7 +629,11 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 				log << TestLog::Message << "Invalidating following ranges:" << TestLog::EndMessage;
 
 				for (size_t ndx = 0; ndx < config.flushMappings.size(); ndx++)
-					log << TestLog::Message << "\tOffset: " << config.flushMappings[ndx].offset * atomSize << ", Size: " << config.flushMappings[ndx].size * atomSize << TestLog::EndMessage;
+				{
+					const VkDeviceSize	offset	= (config.flushMappings[ndx].offset % atomSize == 0) ? config.flushMappings[ndx].offset : config.flushMappings[ndx].offset - (config.flushMappings[ndx].offset % atomSize);
+					const VkDeviceSize	size	= (config.flushMappings[ndx].size % atomSize == 0) ? config.flushMappings[ndx].size : config.flushMappings[ndx].size + (atomSize - (config.flushMappings[ndx].size % atomSize));
+					log << TestLog::Message << "\tOffset: " << offset << ", Size: " << size << TestLog::EndMessage;
+				}
 			}
 
 			if (!config.invalidateMappings.empty())
@@ -642,7 +641,11 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 				log << TestLog::Message << "Flushing following ranges:" << TestLog::EndMessage;
 
 				for (size_t ndx = 0; ndx < config.invalidateMappings.size(); ndx++)
-					log << TestLog::Message << "\tOffset: " << config.invalidateMappings[ndx].offset * atomSize << ", Size: " << config.invalidateMappings[ndx].size * atomSize << TestLog::EndMessage;
+				{
+					const VkDeviceSize	offset = (config.invalidateMappings[ndx].offset % atomSize == 0) ? config.invalidateMappings[ndx].offset : config.invalidateMappings[ndx].offset - (config.invalidateMappings[ndx].offset % atomSize);
+					const VkDeviceSize	size = (config.invalidateMappings[ndx].size % atomSize == 0) ? config.invalidateMappings[ndx].size : config.invalidateMappings[ndx].size + (atomSize - (config.invalidateMappings[ndx].size % atomSize));
+					log << TestLog::Message << "\tOffset: " << offset << ", Size: " << size << TestLog::EndMessage;
+				}
 			}
 
 			if ((memoryType.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0)
@@ -689,8 +692,8 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 							DE_NULL,
 
 							*memory,
-							config.flushMappings[ndx].offset * atomSize,
-							config.flushMappings[ndx].size * atomSize
+							(config.flushMappings[ndx].offset % atomSize == 0) ? config.flushMappings[ndx].offset : config.flushMappings[ndx].offset - (config.flushMappings[ndx].offset % atomSize),
+							(config.flushMappings[ndx].size % atomSize == 0) ? config.flushMappings[ndx].size : config.flushMappings[ndx].size + (atomSize - (config.flushMappings[ndx].size % atomSize)),
 						};
 
 						ranges.push_back(range);
@@ -721,8 +724,8 @@ tcu::TestStatus testMemoryMapping (Context& context, const TestConfig config)
 							DE_NULL,
 
 							*memory,
-							config.invalidateMappings[ndx].offset * atomSize,
-							config.invalidateMappings[ndx].size * atomSize
+							(config.invalidateMappings[ndx].offset % atomSize == 0) ? config.invalidateMappings[ndx].offset : config.invalidateMappings[ndx].offset - (config.invalidateMappings[ndx].offset % atomSize),
+							(config.invalidateMappings[ndx].size % atomSize == 0) ? config.invalidateMappings[ndx].size : config.invalidateMappings[ndx].size + (atomSize - (config.invalidateMappings[ndx].size % atomSize)),
 						};
 
 						ranges.push_back(range);
@@ -1046,17 +1049,6 @@ VkDeviceSize getHostPageSize (void)
 	return 4096;
 }
 
-VkDeviceSize getMinAtomSize (VkDeviceSize nonCoherentAtomSize, const vector<MemoryType>& memoryTypes)
-{
-	for (size_t ndx = 0; ndx < memoryTypes.size(); ndx++)
-	{
-		if ((memoryTypes[ndx].type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0)
-			return 1;
-	}
-
-	return nonCoherentAtomSize;
-}
-
 class MemoryHeap
 {
 public:
@@ -1069,7 +1061,7 @@ public:
 		, m_memoryTypes			(memoryTypes)
 		, m_limits				(memoryLimits)
 		, m_nonCoherentAtomSize	(nonCoherentAtomSize)
-		, m_minAtomSize			(getMinAtomSize(nonCoherentAtomSize, memoryTypes))
+		, m_minAtomSize			(nonCoherentAtomSize)
 		, m_totalMemTracker		(totalMemTracker)
 		, m_usage				(0)
 	{
@@ -1182,9 +1174,7 @@ MemoryObject* MemoryHeap::allocateRandom (const DeviceInterface& vkd, VkDevice d
 		for (size_t memoryTypeNdx = 0; memoryTypeNdx < m_memoryTypes.size(); memoryTypeNdx++)
 		{
 			const MemoryType	type						= m_memoryTypes[memoryTypeNdx];
-			const VkDeviceSize	atomSize					= (type.type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0
-															? 1
-															: m_nonCoherentAtomSize;
+			const VkDeviceSize	atomSize					= m_nonCoherentAtomSize;
 			const VkDeviceSize	allocationSizeGranularity	= de::max(atomSize, memClass == MEMORY_CLASS_DEVICE ? m_limits.devicePageSize : getHostPageSize());
 			const VkDeviceSize	minAllocationSize			= allocationSizeGranularity;
 			const VkDeviceSize	minReferenceSize			= minAllocationSize
@@ -1260,9 +1250,7 @@ MemoryObject* MemoryHeap::allocateRandom (const DeviceInterface& vkd, VkDevice d
 
 	const MemoryType		type						= memoryTypeMaxSizePair.first;
 	const VkDeviceSize		maxAllocationSize			= memoryTypeMaxSizePair.second / MAX_MEMORY_ALLOC_DIV;
-	const VkDeviceSize		atomSize					= (type.type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0
-														? 1
-														: m_nonCoherentAtomSize;
+	const VkDeviceSize		atomSize					= m_nonCoherentAtomSize;
 	const VkDeviceSize		allocationSizeGranularity	= de::max(atomSize, getMemoryClass() == MEMORY_CLASS_DEVICE ? m_limits.devicePageSize : getHostPageSize());
 	const VkDeviceSize		size						= randomSize(rng, atomSize, maxAllocationSize);
 	const VkDeviceSize		memoryUsage					= roundUpToMultiple(size, allocationSizeGranularity);
@@ -1306,10 +1294,7 @@ public:
 		const VkPhysicalDevice					physicalDevice		= context.getPhysicalDevice();
 		const InstanceInterface&				vki					= context.getInstanceInterface();
 		const VkPhysicalDeviceMemoryProperties	memoryProperties	= getPhysicalDeviceMemoryProperties(vki, physicalDevice);
-		// \todo [2016-05-26 misojarvi] Remove zero check once drivers report correctly 1 instead of 0
-		const VkDeviceSize						nonCoherentAtomSize	= context.getDeviceProperties().limits.nonCoherentAtomSize != 0
-																	? context.getDeviceProperties().limits.nonCoherentAtomSize
-																	: 1;
+		const VkDeviceSize						nonCoherentAtomSize	= context.getDeviceProperties().limits.nonCoherentAtomSize;
 
 		// Initialize heaps
 		{
@@ -1555,21 +1540,21 @@ TestConfig subMappedConfig (VkDeviceSize				allocationSize,
 	switch (op)
 	{
 		case OP_NONE:
-			return config;
+			break;
 
 		case OP_REMAP:
 			config.remap = true;
-			return config;
+			break;
 
 		case OP_FLUSH:
 			config.flushMappings = vector<MemoryRange>(1, MemoryRange(mapping.offset, mapping.size));
-			return config;
+			break;
 
 		case OP_SUB_FLUSH:
 			DE_ASSERT(mapping.size / 4 > 0);
 
 			config.flushMappings = vector<MemoryRange>(1, MemoryRange(mapping.offset + mapping.size / 4, mapping.size / 2));
-			return config;
+			break;
 
 		case OP_SUB_FLUSH_SEPARATE:
 			DE_ASSERT(mapping.size / 2 > 0);
@@ -1577,7 +1562,7 @@ TestConfig subMappedConfig (VkDeviceSize				allocationSize,
 			config.flushMappings.push_back(MemoryRange(mapping.offset + mapping.size /  2, mapping.size - (mapping.size / 2)));
 			config.flushMappings.push_back(MemoryRange(mapping.offset, mapping.size / 2));
 
-			return config;
+			break;
 
 		case OP_SUB_FLUSH_OVERLAPPING:
 			DE_ASSERT((mapping.size / 3) > 0);
@@ -1585,19 +1570,19 @@ TestConfig subMappedConfig (VkDeviceSize				allocationSize,
 			config.flushMappings.push_back(MemoryRange(mapping.offset + mapping.size /  3, mapping.size - (mapping.size / 2)));
 			config.flushMappings.push_back(MemoryRange(mapping.offset, (2 * mapping.size) / 3));
 
-			return config;
+			break;
 
 		case OP_INVALIDATE:
 			config.flushMappings = vector<MemoryRange>(1, MemoryRange(mapping.offset, mapping.size));
 			config.invalidateMappings = vector<MemoryRange>(1, MemoryRange(mapping.offset, mapping.size));
-			return config;
+			break;
 
 		case OP_SUB_INVALIDATE:
 			DE_ASSERT(mapping.size / 4 > 0);
 
 			config.flushMappings = vector<MemoryRange>(1, MemoryRange(mapping.offset + mapping.size / 4, mapping.size / 2));
 			config.invalidateMappings = vector<MemoryRange>(1, MemoryRange(mapping.offset + mapping.size / 4, mapping.size / 2));
-			return config;
+			break;
 
 		case OP_SUB_INVALIDATE_SEPARATE:
 			DE_ASSERT(mapping.size / 2 > 0);
@@ -1608,7 +1593,7 @@ TestConfig subMappedConfig (VkDeviceSize				allocationSize,
 			config.invalidateMappings.push_back(MemoryRange(mapping.offset + mapping.size /  2, mapping.size - (mapping.size / 2)));
 			config.invalidateMappings.push_back(MemoryRange(mapping.offset, mapping.size / 2));
 
-			return config;
+			break;
 
 		case OP_SUB_INVALIDATE_OVERLAPPING:
 			DE_ASSERT((mapping.size / 3) > 0);
@@ -1619,12 +1604,25 @@ TestConfig subMappedConfig (VkDeviceSize				allocationSize,
 			config.invalidateMappings.push_back(MemoryRange(mapping.offset + mapping.size /  3, mapping.size - (mapping.size / 2)));
 			config.invalidateMappings.push_back(MemoryRange(mapping.offset, (2 * mapping.size) / 3));
 
-			return config;
+			break;
 
 		default:
 			DE_FATAL("Unknown Op");
 			return TestConfig();
 	}
+	for (size_t ndx = 0; ndx < config.flushMappings.size(); ndx++)
+	{
+		if (config.flushMappings[ndx].offset + config.flushMappings[ndx].size > mapping.size) {
+			config.flushMappings[ndx].size = VK_WHOLE_SIZE;
+		}
+	}
+	for (size_t ndx = 0; ndx < config.invalidateMappings.size(); ndx++)
+	{
+		if (config.invalidateMappings[ndx].offset + config.invalidateMappings[ndx].size > mapping.size) {
+			config.invalidateMappings[ndx].size = VK_WHOLE_SIZE;
+		}
+	}
+	return config;
 }
 
 TestConfig fullMappedConfig (VkDeviceSize	allocationSize,

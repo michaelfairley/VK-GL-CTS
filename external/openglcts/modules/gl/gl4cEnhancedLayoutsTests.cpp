@@ -1057,7 +1057,7 @@ bool verifyVarying(Program& program, const std::string& parent_name, const Varia
  *
  * @return true if verification is positive, false otherwise
  **/
-bool checkVarying(Program& program, const Variable& variable, std::stringstream& stream, bool is_input)
+bool checkVarying(Program& program, Shader::STAGES stage, const Variable& variable, std::stringstream& stream, bool is_input)
 {
 	bool result = true;
 
@@ -1091,6 +1091,17 @@ bool checkVarying(Program& program, const Variable& variable, std::stringstream&
 		Utils::Interface* interface		 = variable.m_descriptor.m_interface;
 		const size_t	  n_members		 = interface->m_members.size();
 		std::string		  structVariable = variable.m_descriptor.m_name;
+
+		switch (Variable::GetFlavour(stage, is_input ? Variable::INPUT : Variable::OUTPUT))
+		{
+		case Variable::ARRAY:
+		case Variable::INDEXED_BY_INVOCATION_ID:
+			structVariable.append("[0]");
+			break;
+		default:
+			break;
+		}
+
 		// If struct variable is an array
 		if (0 != variable.m_descriptor.m_n_array_elements)
 		{
@@ -1319,7 +1330,7 @@ bool checkProgramStage(Program& program, const ProgramInterface& program_interfa
 
 		for (const_iterator it = inputs.begin(); it != inputs.end(); ++it)
 		{
-			if (false == checkVarying(program, **it, stream, true))
+			if (false == checkVarying(program, stage, **it, stream, true))
 			{
 				result = false;
 			}
@@ -1333,7 +1344,7 @@ bool checkProgramStage(Program& program, const ProgramInterface& program_interfa
 
 		for (const_iterator it = outputs.begin(); it != outputs.end(); ++it)
 		{
-			if (false == checkVarying(program, **it, stream, false))
+			if (false == checkVarying(program, stage, **it, stream, false))
 			{
 				result = false;
 			}
@@ -5067,7 +5078,7 @@ tcu::TestNode::IterateResult TestBase::iterate()
  *
  * @return Last location index
  **/
-GLint TestBase::getLastInputLocation(Utils::Shader::STAGES stage, const Utils::Type& type, GLuint array_length)
+GLint TestBase::getLastInputLocation(Utils::Shader::STAGES stage, const Utils::Type& type, GLuint array_length, bool ignore_prev_stage)
 {
 	GLint  divide		= 4; /* 4 components per location */
 	GLint  param		= 0;
@@ -5115,7 +5126,7 @@ GLint TestBase::getLastInputLocation(Utils::Shader::STAGES stage, const Utils::T
 	gl.getIntegerv(pname, &param);
 	GLU_EXPECT_NO_ERROR(gl.getError(), "GetIntegerv");
 
-	if (pnamePrev) {
+	if (pnamePrev && !ignore_prev_stage) {
 		gl.getIntegerv(pnamePrev, &paramPrev);
 		GLU_EXPECT_NO_ERROR(gl.getError(), "GetIntegerv");
 
@@ -5147,7 +5158,7 @@ GLint TestBase::getLastInputLocation(Utils::Shader::STAGES stage, const Utils::T
  *
  * @return Last location index
  **/
-GLint TestBase::getLastOutputLocation(Utils::Shader::STAGES stage, const Utils::Type& type, GLuint array_length)
+GLint TestBase::getLastOutputLocation(Utils::Shader::STAGES stage, const Utils::Type& type, GLuint array_length, bool ignore_next_stage)
 {
 	GLint  param		= 0;
 	GLenum pname		= 0;
@@ -5190,9 +5201,6 @@ GLint TestBase::getLastOutputLocation(Utils::Shader::STAGES stage, const Utils::
 	gl.getIntegerv(pname, &param);
 	GLU_EXPECT_NO_ERROR(gl.getError(), "GetIntegerv");
 
-	gl.getIntegerv(pnameNext, &paramNext);
-	GLU_EXPECT_NO_ERROR(gl.getError(), "GetIntegerv");
-
 /* Calculate */
 #if WRKARD_VARYINGLOCATIONSTEST
 
@@ -5201,7 +5209,13 @@ GLint TestBase::getLastOutputLocation(Utils::Shader::STAGES stage, const Utils::
 #else
 
 	/* Don't write to a location that doesn't exist in the next stage */
-	param = de::min(param, paramNext);
+	if (!ignore_next_stage)
+	{
+		gl.getIntegerv(pnameNext, &paramNext);
+		GLU_EXPECT_NO_ERROR(gl.getError(), "GetIntegerv");
+
+		param = de::min(param, paramNext);
+	}
 
 	const GLint n_avl_locations = param / 4; /* 4 components per location */
 
@@ -5509,7 +5523,6 @@ bool TestBase::test()
 
 	for (GLuint test_case = 0; test_case < n_test_cases; ++test_case)
 	{
-
 #endif /* DEBUG_REPEAT_TEST_CASE */
 
 		bool case_result = true;
@@ -5609,7 +5622,8 @@ void BufferTestBase::getBufferDescriptors(glw::GLuint /* test_case_index */,
  * @param ignored
  **/
 void BufferTestBase::getCapturedVaryings(glw::GLuint /* test_case_index */,
-										 Utils::Program::NameVector& /* captured_varyings */)
+										 Utils::Program::NameVector& /* captured_varyings */,
+										 GLint* /* xfb_components */)
 {
 	/* Nothing to be done */
 }
@@ -5701,7 +5715,21 @@ bool BufferTestBase::testCase(GLuint test_case_index)
 		Utils::VertexArray		   vao(m_context);
 
 		/* Get captured varyings */
-		getCapturedVaryings(test_case_index, captured_varyings);
+		GLint xfb_components;
+		getCapturedVaryings(test_case_index, captured_varyings, &xfb_components);
+
+		/* Don't generate shaders that try to capture more XFB components than the implementation's limit */
+		if (captured_varyings.size() > 0)
+		{
+			const Functions& gl	= m_context.getRenderContext().getFunctions();
+
+			GLint max_xfb_components;
+			gl.getIntegerv(GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS, &max_xfb_components);
+			GLU_EXPECT_NO_ERROR(gl.getError(), "GetIntegerv");
+
+			if (xfb_components > max_xfb_components)
+				return true;
+		}
 
 		/* Get shader sources */
 		const std::string& fragment_shader  = getShaderSource(test_case_index, Utils::Shader::FRAGMENT);
@@ -6716,23 +6744,52 @@ void TextureTestBase::prepareAttributes(GLuint test_case_index, Utils::ProgramIn
 		return;
 	}
 
-	/* Calculate vertex stride and check */
-	GLint vertex_stride = 0;
+	const Functions& gl = m_context.getRenderContext().getFunctions();
 
+	/* Calculate vertex stride and check */
+	GLint max_inputs;
+	gl.getIntegerv(GL_MAX_VERTEX_ATTRIBS, &max_inputs);
+	GLU_EXPECT_NO_ERROR(gl.getError(), "GetIntegerv");
+
+	/* dvec3/4 vertex inputs use a single location but require 2x16B slots */
+	GLint max_slots = max_inputs * 2;
+
+	/* Compute used slots */
+	std::vector<GLint> slot_sizes;
+	slot_sizes.resize(max_slots);
+	std::fill(slot_sizes.begin(), slot_sizes.end(), 0);
 	for (GLuint i = 0; i < si.m_inputs.size(); ++i)
 	{
 		Utils::Variable& variable = *si.m_inputs[i];
 
 		GLint variable_size = static_cast<GLuint>(variable.m_data_size);
 
-		GLint ends_at = variable_size + variable.m_descriptor.m_offset;
+		GLint base_slot = variable.m_descriptor.m_expected_location + variable.m_descriptor.m_offset / 16;
+		GLint ends_at = variable.m_descriptor.m_offset % 16 + variable_size;
 
-		vertex_stride = std::max(vertex_stride, ends_at);
+		GLint array_length = std::max(1u, variable.m_descriptor.m_n_array_elements);
+		for (GLint loc = 0; loc < array_length; loc++) {
+			GLint slot = base_slot + loc;
+			slot_sizes[slot] = std::max(slot_sizes[slot], ends_at);
+		}
+	}
+
+	/* Compute the offsets where we need to put vertex buffer data for each slot */
+	std::vector<GLint> slot_offsets;
+	slot_offsets.resize(max_slots);
+	std::fill(slot_offsets.begin(), slot_offsets.end(), -1);
+	GLint buffer_size = 0;
+	for (GLint i = 0; i < max_slots; i++)
+	{
+		if (slot_sizes[i] == 0)
+			continue;
+		slot_offsets[i] = buffer_size;
+		buffer_size += slot_sizes[i];
 	}
 
 	/* Prepare buffer data and set up vao */
 	std::vector<GLubyte> buffer_data;
-	buffer_data.resize(vertex_stride);
+	buffer_data.resize(buffer_size);
 
 	GLubyte* ptr = &buffer_data[0];
 
@@ -6740,13 +6797,19 @@ void TextureTestBase::prepareAttributes(GLuint test_case_index, Utils::ProgramIn
 	{
 		Utils::Variable& variable = *si.m_inputs[i];
 
-		memcpy(ptr + variable.m_descriptor.m_offset, variable.m_data, variable.m_data_size);
+		GLint base_slot = variable.m_descriptor.m_expected_location + variable.m_descriptor.m_offset / 16;
+		GLint variable_offset = variable.m_descriptor.m_offset % 16;
+		GLint array_length = std::max(1u, variable.m_descriptor.m_n_array_elements);
+		for (GLint loc = 0; loc < array_length; loc++) {
+			GLint slot = base_slot + loc;
+			memcpy(ptr + slot_offsets[slot] + variable_offset, variable.m_data, variable.m_data_size);
+		}
 
 		if (false == use_component_qualifier)
 		{
 			vao.Attribute(variable.m_descriptor.m_expected_location, variable.m_descriptor.m_builtin,
 						  variable.m_descriptor.m_n_array_elements, variable.m_descriptor.m_normalized,
-						  variable.GetStride(), (GLvoid*)(intptr_t)variable.m_descriptor.m_offset);
+						  variable.GetStride(), (GLvoid*)(intptr_t)(slot_offsets[base_slot] + variable_offset));
 		}
 		else if (0 == variable.m_descriptor.m_expected_component)
 		{
@@ -6757,12 +6820,12 @@ void TextureTestBase::prepareAttributes(GLuint test_case_index, Utils::ProgramIn
 
 			vao.Attribute(variable.m_descriptor.m_expected_location, type, variable.m_descriptor.m_n_array_elements,
 						  variable.m_descriptor.m_normalized, variable.GetStride(),
-						  (GLvoid*)(intptr_t)variable.m_descriptor.m_offset);
+						  (GLvoid*)(intptr_t)(slot_offsets[base_slot] + variable_offset));
 		}
 	}
 
 	/* Update buffer */
-	buffer.Data(Utils::Buffer::StaticDraw, vertex_stride, ptr);
+	buffer.Data(Utils::Buffer::StaticDraw, buffer_size, ptr);
 }
 
 /** Get locations for all outputs with automatic_location
@@ -12370,7 +12433,7 @@ void VaryingLocationsTest::prepareShaderStage(Utils::Shader::STAGES stage, const
 	const GLuint array_length  = 1;
 	const GLuint first_in_loc  = 0;
 	const GLuint first_out_loc = 0;
-	const GLuint last_in_loc   = getLastInputLocation(stage, type, array_length);
+	const GLuint last_in_loc   = getLastInputLocation(stage, type, array_length, false);
 	size_t		 position	  = 0;
 
 	const GLchar* prefix_in = Utils::ProgramInterface::GetStagePrefix(stage, Utils::Variable::VARYING_INPUT);
@@ -12422,7 +12485,7 @@ void VaryingLocationsTest::prepareShaderStage(Utils::Shader::STAGES stage, const
 
 	if (Utils::Shader::FRAGMENT != stage)
 	{
-		const GLuint last_out_loc = getLastOutputLocation(stage, type, array_length);
+		const GLuint last_out_loc = getLastOutputLocation(stage, type, array_length, false);
 
 		Utils::Variable* first_out =
 			si.Output(first_out_name.c_str(), qual_first_out /* qualifiers */, 0 /* expected_componenet */,
@@ -12740,7 +12803,7 @@ void VaryingArrayLocationsTest::prepareShaderStage(Utils::Shader::STAGES stage, 
 	const GLuint array_length  = 1u;
 	const GLuint first_in_loc  = 0;
 	const GLuint first_out_loc = 0;
-	const GLuint last_in_loc   = getLastInputLocation(stage, type, array_length);
+	const GLuint last_in_loc   = getLastInputLocation(stage, type, array_length, false);
 	size_t		 position	  = 0;
 
 	const GLchar* prefix_in = Utils::ProgramInterface::GetStagePrefix(stage, Utils::Variable::VARYING_INPUT);
@@ -12793,7 +12856,7 @@ void VaryingArrayLocationsTest::prepareShaderStage(Utils::Shader::STAGES stage, 
 
 	if (Utils::Shader::FRAGMENT != stage)
 	{
-		const GLuint last_out_loc = getLastOutputLocation(stage, type, array_length);
+		const GLuint last_out_loc = getLastOutputLocation(stage, type, array_length, false);
 
 		Utils::Variable* first_out =
 			si.Output(first_out_name.c_str(), qual_first_out /* qualifiers */, 0 /* expected_componenet */,
@@ -14532,7 +14595,7 @@ std::string VaryingLocationLimitTest::getShaderSource(GLuint test_case_index, Ut
 		const GLchar*			 direction = "in ";
 		const GLchar*			 flat	  = "";
 		const GLchar*			 index	 = "";
-		GLuint					 last	  = getLastInputLocation(stage, test_case.m_type, 0);
+		GLuint					 last	  = getLastInputLocation(stage, test_case.m_type, 0, true);
 		size_t					 position  = 0;
 		size_t					 temp;
 		const GLchar*			 type_name = test_case.m_type.GetGLSLTypeName();
@@ -14542,7 +14605,7 @@ std::string VaryingLocationLimitTest::getShaderSource(GLuint test_case_index, Ut
 		if (false == test_case.m_is_input)
 		{
 			direction = "out";
-			last	  = getLastOutputLocation(stage, test_case.m_type, 0);
+			last	  = getLastOutputLocation(stage, test_case.m_type, 0, true);
 			storage   = Utils::Variable::VARYING_OUTPUT;
 			var_use   = output_use;
 		}
@@ -14949,7 +15012,7 @@ void VaryingComponentsTest::prepareShaderStage(Utils::Shader::STAGES stage, cons
 	const GLuint			first_in_loc  = 0;
 	const GLuint			first_out_loc = 0;
 	const GLchar*			interpolation = "";
-	const GLuint			last_in_loc   = getLastInputLocation(stage, vector_type, array_length);
+	const GLuint			last_in_loc   = getLastInputLocation(stage, vector_type, array_length, false);
 	GLuint					last_out_loc  = 0;
 	GLuint					n_desc		  = 0;
 	Utils::ShaderInterface& si			  = program_interface.GetShaderInterface(stage);
@@ -14962,7 +15025,7 @@ void VaryingComponentsTest::prepareShaderStage(Utils::Shader::STAGES stage, cons
 
 	if (Utils::Shader::FRAGMENT != stage)
 	{
-		last_out_loc = getLastOutputLocation(stage, vector_type, array_length);
+		last_out_loc = getLastOutputLocation(stage, vector_type, array_length, false);
 	}
 
 	switch (test_case.m_layout)
@@ -17853,7 +17916,8 @@ void VaryingLocationAliasingWithMixedTypesTest::testInit()
 						testCase test_case_out = { gohan,	  goten,	 false, (Utils::Shader::STAGES)stage,
 												   type_gohan, type_goten };
 
-						m_test_cases.push_back(test_case_in);
+						if (Utils::Shader::VERTEX != stage)
+							m_test_cases.push_back(test_case_in);
 
 						/* Skip double outputs in fragment shader */
 						if ((Utils::Shader::FRAGMENT != stage) || ((Utils::Type::Double != type_gohan.m_basic_type) &&
@@ -17871,7 +17935,8 @@ void VaryingLocationAliasingWithMixedTypesTest::testInit()
 						testCase test_case_out = { gohan,	  goten,	 false, (Utils::Shader::STAGES)stage,
 												   type_gohan, type_goten };
 
-						m_test_cases.push_back(test_case_in);
+						if (Utils::Shader::VERTEX != stage)
+							m_test_cases.push_back(test_case_in);
 
 						/* Skip double outputs in fragment shader */
 						if ((Utils::Shader::FRAGMENT != stage) || ((Utils::Type::Double != type_gohan.m_basic_type) &&
@@ -19955,8 +20020,9 @@ const GLuint XFBStrideOfEmptyListTest::m_stride = 64;
  * @param context Test context
  **/
 XFBStrideOfEmptyListTest::XFBStrideOfEmptyListTest(deqp::Context& context)
-	: BufferTestBase(context, "xfb_stride_of_empty_list",
-					 "Test verifies that xfb_stride qualifier is respected when no xfb_offset is specified")
+	: BufferTestBase(
+		  context, "xfb_stride_of_empty_list",
+		  "Test verifies correct behavior when xfb_stride qualifier is specified but no xfb_offset is specified")
 {
 	/* Nothing to be done here */
 }
@@ -20015,20 +20081,18 @@ bool XFBStrideOfEmptyListTest::executeDrawCall(bool /* tesEnabled */, GLuint tes
 		break;
 
 	case SECOND_MISSING:
-		if (GL_NO_ERROR == error)
+		if (GL_NO_ERROR != error)
 		{
 			gl.endTransformFeedback();
+			GLU_EXPECT_NO_ERROR(error, "BeginTransformFeedback");
 		}
 
-		if (GL_INVALID_OPERATION != error)
-		{
-			m_context.getTestContext().getLog()
-				<< tcu::TestLog::Message << "XFB at index 1, that is declared as empty, is missing. It was expected "
-											"that INVALID_OPERATION will generated by BeginTransformFeedback. Got: "
-				<< glu::getErrorStr(error) << tcu::TestLog::EndMessage;
+		gl.drawArrays(GL_PATCHES, 0 /* first */, 1 /* count */);
+		error = gl.getError();
 
-			result = false;
-		}
+		gl.endTransformFeedback();
+		GLU_EXPECT_NO_ERROR(error, "DrawArrays");
+		GLU_EXPECT_NO_ERROR(gl.getError(), "EndTransformFeedback");
 
 		break;
 	}
@@ -20132,8 +20196,8 @@ void XFBStrideOfEmptyListTest::getBufferDescriptors(glw::GLuint				  test_case_i
 		/* Data */
 		uniform.m_initial_data = Utils::Type::vec4.GenerateDataPacked();
 
-		/* Draw call will not be executed, contents does not matter */
 		xfb_0.m_initial_data = Utils::Type::vec4.GenerateDataPacked();
+		xfb_0.m_expected_data = uniform.m_initial_data;
 	}
 
 	break;
@@ -20290,20 +20354,18 @@ bool XFBStrideOfEmptyListAndAPITest::executeDrawCall(bool /* tesEnabled */, GLui
 		break;
 
 	case FIRST_MISSING:
-		if (GL_NO_ERROR == error)
+		if (GL_NO_ERROR != error)
 		{
 			gl.endTransformFeedback();
+			GLU_EXPECT_NO_ERROR(error, "BeginTransformFeedback");
 		}
 
-		if (GL_INVALID_OPERATION != error)
-		{
-			m_context.getTestContext().getLog()
-				<< tcu::TestLog::Message << "XFB at index 0, that is declared as empty, is missing. It was expected "
-											"that INVALID_OPERATION will generated by BeginTransformFeedback. Got: "
-				<< glu::getErrorStr(error) << tcu::TestLog::EndMessage;
+		gl.drawArrays(GL_PATCHES, 0 /* first */, 1 /* count */);
+		error = gl.getError();
 
-			result = false;
-		}
+		gl.endTransformFeedback();
+		GLU_EXPECT_NO_ERROR(error, "DrawArrays");
+		GLU_EXPECT_NO_ERROR(gl.getError(), "EndTransformFeedback");
 
 		break;
 
@@ -20316,8 +20378,8 @@ bool XFBStrideOfEmptyListAndAPITest::executeDrawCall(bool /* tesEnabled */, GLui
 		if (GL_INVALID_OPERATION != error)
 		{
 			m_context.getTestContext().getLog()
-				<< tcu::TestLog::Message << "XFB at index 1, that is written by GS, is missing. It was expected that "
-											"INVALID_OPERATION will generated by BeginTransformFeedback. Got: "
+				<< tcu::TestLog::Message << "XFB at index 1, that is declared as empty, is missing. It was expected "
+											"that INVALID_OPERATION will generated by BeginTransformFeedback. Got: "
 				<< glu::getErrorStr(error) << tcu::TestLog::EndMessage;
 
 			result = false;
@@ -20399,8 +20461,9 @@ void XFBStrideOfEmptyListAndAPITest::getBufferDescriptors(glw::GLuint				test_ca
 		/* Data */
 		uniform.m_initial_data = Utils::Type::vec4.GenerateDataPacked();
 
-		/* Draw call will not be executed, contents does not matter */
-		xfb_1.m_initial_data = Utils::Type::vec4.GenerateDataPacked();
+		/* Data, contents are the same as no modification is expected */
+		xfb_1.m_initial_data  = Utils::Type::vec4.GenerateDataPacked();
+		xfb_1.m_expected_data = uniform.m_initial_data;
 	}
 
 	break;
@@ -20426,7 +20489,7 @@ void XFBStrideOfEmptyListAndAPITest::getBufferDescriptors(glw::GLuint				test_ca
 		uniform.m_initial_data = Utils::Type::vec4.GenerateDataPacked();
 
 		/* Draw call will not be executed, contents does not matter */
-		xfb_0.m_initial_data.resize(m_stride);
+		xfb_0.m_initial_data = Utils::Type::vec4.GenerateDataPacked();
 	}
 
 	break;
@@ -20439,9 +20502,12 @@ void XFBStrideOfEmptyListAndAPITest::getBufferDescriptors(glw::GLuint				test_ca
  * @param captured_varyings Vector of varying names to be captured
  **/
 void XFBStrideOfEmptyListAndAPITest::getCapturedVaryings(glw::GLuint /* test_case_index */,
-														 Utils::Program::NameVector& captured_varyings)
+														 Utils::Program::NameVector& captured_varyings,
+														 GLint* xfb_components)
 {
-	captured_varyings.push_back("gs_fs");
+	captured_varyings.push_back("gs_fs1");
+	captured_varyings.push_back("gs_fs2");
+	*xfb_components	= 4;
 }
 
 /** Get body of main function for given shader stage
@@ -20456,8 +20522,9 @@ void XFBStrideOfEmptyListAndAPITest::getShaderBody(GLuint /* test_case_index */,
 {
 	out_calculations = "";
 
-	static const GLchar* gs = "    gs_fs  = uni_gs;\n";
-	static const GLchar* fs = "    fs_out = vec4(gs_fs);\n";
+	static const GLchar* gs = "    gs_fs1 = -uni_gs;\n"
+							  "    gs_fs2 = uni_gs;\n";
+	static const GLchar* fs = "    fs_out = vec4(gs_fs2);\n";
 
 	const GLchar* assignments = "";
 	switch (stage)
@@ -20484,13 +20551,13 @@ void XFBStrideOfEmptyListAndAPITest::getShaderBody(GLuint /* test_case_index */,
 void XFBStrideOfEmptyListAndAPITest::getShaderInterface(GLuint /* test_case_index */, Utils::Shader::STAGES stage,
 														std::string& out_interface)
 {
-	static const GLchar* gs = "layout (xfb_buffer = 0, xfb_stride = 64) out;\n"
-							  "layout (xfb_buffer = 1, xfb_offset = 0)  out vec4 gs_fs;\n"
+	static const GLchar* gs = "layout (xfb_buffer = 0, xfb_stride = 64) out vec4 gs_fs1;\n"
+							  "layout (xfb_buffer = 1, xfb_offset = 0)  out vec4 gs_fs2;\n"
 							  "\n"
 							  "layout(binding    = 0) uniform gs_block {\n"
 							  "    vec4 uni_gs;\n"
 							  "};\n";
-	static const GLchar* fs = "in  vec4 gs_fs;\n"
+	static const GLchar* fs = "in  vec4 gs_fs2;\n"
 							  "out vec4 fs_out;\n";
 
 	switch (stage)
@@ -21502,10 +21569,11 @@ std::string XFBBlockStrideTest::getShaderSource(GLuint test_case_index, Utils::S
 							  "\n"
 							  "in  vec4 in_vs;\n"
 							  "out vec4 vs_tcs;\n"
+							  "out vec4 tes_gs;\n"
 							  "\n"
 							  "void main()\n"
 							  "{\n"
-							  "    vs_tcs = in_vs;\n"
+							  "    vs_tcs = tes_gs = in_vs;\n"
 							  "}\n"
 							  "\n";
 	static const GLchar* vs_tested = "#version 430 core\n"
@@ -22807,12 +22875,18 @@ void XFBOverrideQualifiersWithAPITest::getBufferDescriptors(glw::GLuint				  tes
  * @param ignored
  * @param captured_varyings List of names
  **/
-void XFBOverrideQualifiersWithAPITest::getCapturedVaryings(glw::GLuint /* test_case_index */,
-														   Utils::Program::NameVector& captured_varyings)
+void XFBOverrideQualifiersWithAPITest::getCapturedVaryings(glw::GLuint test_case_index,
+														   Utils::Program::NameVector& captured_varyings,
+														   GLint* xfb_components)
 {
 	captured_varyings.resize(1);
 
 	captured_varyings[0] = "trunks";
+
+	/* The test captures 3 varyings of type 'type' */
+	Utils::Type	type		= getType(test_case_index);
+	GLint		type_size	= type.GetSize(false);
+	*xfb_components			= 3 * type_size / 4;
 }
 
 /** Get body of main function for given shader stage

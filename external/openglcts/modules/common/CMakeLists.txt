@@ -5,11 +5,9 @@ if (DEQP_SUPPORT_WGL)
 	add_definitions(-DGLCTS_SUPPORT_WGL=1)
 endif ()
 
-include_directories(
-	${PROJECT_SOURCE_DIR}/modules/glshared
-	)
-
 set(GLCTS_COMMON_SRCS
+	glcAggressiveShaderOptimizationsTests.cpp
+	glcAggressiveShaderOptimizationsTests.hpp
 	glcBlendEquationAdvancedTests.cpp
 	glcBlendEquationAdvancedTests.hpp
 	glcConfigList.hpp
@@ -32,14 +30,24 @@ set(GLCTS_COMMON_SRCS
 	glcFragDepthTests.hpp
 	glcInfoTests.cpp
 	glcInfoTests.hpp
+	glcInternalformatTests.cpp
+	glcInternalformatTests.hpp
+	glcMisc.cpp
+	glcMisc.hpp
+	glcKHRDebugTests.cpp
+	glcKHRDebugTests.hpp
 	glcMultipleContextsTests.cpp
 	glcMultipleContextsTests.hpp
 	glcNoErrorTests.cpp
 	glcNoErrorTests.hpp
 	glcRobustnessTests.cpp
 	glcRobustnessTests.hpp
+	glcPackedPixelsTests.cpp
+	glcPackedPixelsTests.hpp
 	glcPolygonOffsetClampTests.cpp
 	glcPolygonOffsetClampTests.hpp
+	glcPackedDepthStencilTests.cpp
+	glcPackedDepthStencilTests.hpp
 	glcParallelShaderCompileTests.cpp
 	glcParallelShaderCompileTests.hpp
 	glcRobustBufferAccessBehaviorTests.cpp
@@ -94,6 +102,8 @@ set(GLCTS_COMMON_SRCS
 	glcTestSubcase.hpp
 	glcExtTokens.cpp
 	glcExtTokens.hpp
+	glcLayoutLocationTests.cpp
+	glcLayoutLocationTests.hpp
 	glcLimitTest.inl
 	glcLimitTest.hpp
 	glcWaiver.hpp
@@ -104,6 +114,8 @@ set(GLCTS_COMMON_LIBS
 	tcutil
 	eglutil
 	)
+
+PCH(GLCTS_COMMON_SRCS ../pch.cpp)
 
 add_library(glcts-common STATIC ${GLCTS_COMMON_SRCS})
 target_link_libraries(glcts-common ${GLCTS_COMMON_LIBS})

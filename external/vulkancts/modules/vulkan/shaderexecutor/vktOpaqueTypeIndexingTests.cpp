@@ -30,6 +30,7 @@
 #include "vkMemUtil.hpp"
 #include "vkTypeUtil.hpp"
 #include "vkQueryUtil.hpp"
+#include "vkCmdUtil.hpp"
 
 #include "tcuTexture.hpp"
 #include "tcuTestLog.hpp"
@@ -160,6 +161,7 @@ enum IndexExprType
 enum TextureType
 {
 	TEXTURE_TYPE_1D = 0,
+	TEXTURE_TYPE_1D_ARRAY,
 	TEXTURE_TYPE_2D,
 	TEXTURE_TYPE_CUBE,
 	TEXTURE_TYPE_2D_ARRAY,
@@ -296,6 +298,12 @@ static TextureType getTextureType (glu::DataType samplerType)
 		case glu::TYPE_SAMPLER_1D_SHADOW:
 			return TEXTURE_TYPE_1D;
 
+		case glu::TYPE_SAMPLER_1D_ARRAY:
+		case glu::TYPE_INT_SAMPLER_1D_ARRAY:
+		case glu::TYPE_UINT_SAMPLER_1D_ARRAY:
+		case glu::TYPE_SAMPLER_1D_ARRAY_SHADOW:
+			return TEXTURE_TYPE_1D_ARRAY;
+
 		case glu::TYPE_SAMPLER_2D:
 		case glu::TYPE_INT_SAMPLER_2D:
 		case glu::TYPE_UINT_SAMPLER_2D:
@@ -326,10 +334,11 @@ static TextureType getTextureType (glu::DataType samplerType)
 
 static bool isShadowSampler (glu::DataType samplerType)
 {
-	return samplerType == glu::TYPE_SAMPLER_1D_SHADOW		||
-		   samplerType == glu::TYPE_SAMPLER_2D_SHADOW		||
-		   samplerType == glu::TYPE_SAMPLER_2D_ARRAY_SHADOW	||
-		   samplerType == glu::TYPE_SAMPLER_CUBE_SHADOW;
+	return	samplerType == glu::TYPE_SAMPLER_1D_SHADOW			||
+			samplerType == glu::TYPE_SAMPLER_1D_ARRAY_SHADOW	||
+			samplerType == glu::TYPE_SAMPLER_2D_SHADOW			||
+			samplerType == glu::TYPE_SAMPLER_2D_ARRAY_SHADOW	||
+			samplerType == glu::TYPE_SAMPLER_CUBE_SHADOW;
 }
 
 static glu::DataType getSamplerOutputType (glu::DataType samplerType)
@@ -337,6 +346,7 @@ static glu::DataType getSamplerOutputType (glu::DataType samplerType)
 	switch (samplerType)
 	{
 		case glu::TYPE_SAMPLER_1D:
+		case glu::TYPE_SAMPLER_1D_ARRAY:
 		case glu::TYPE_SAMPLER_2D:
 		case glu::TYPE_SAMPLER_CUBE:
 		case glu::TYPE_SAMPLER_2D_ARRAY:
@@ -344,12 +354,14 @@ static glu::DataType getSamplerOutputType (glu::DataType samplerType)
 			return glu::TYPE_FLOAT_VEC4;
 
 		case glu::TYPE_SAMPLER_1D_SHADOW:
+		case glu::TYPE_SAMPLER_1D_ARRAY_SHADOW:
 		case glu::TYPE_SAMPLER_2D_SHADOW:
 		case glu::TYPE_SAMPLER_CUBE_SHADOW:
 		case glu::TYPE_SAMPLER_2D_ARRAY_SHADOW:
 			return glu::TYPE_FLOAT;
 
 		case glu::TYPE_INT_SAMPLER_1D:
+		case glu::TYPE_INT_SAMPLER_1D_ARRAY:
 		case glu::TYPE_INT_SAMPLER_2D:
 		case glu::TYPE_INT_SAMPLER_CUBE:
 		case glu::TYPE_INT_SAMPLER_2D_ARRAY:
@@ -357,6 +369,7 @@ static glu::DataType getSamplerOutputType (glu::DataType samplerType)
 			return glu::TYPE_INT_VEC4;
 
 		case glu::TYPE_UINT_SAMPLER_1D:
+		case glu::TYPE_UINT_SAMPLER_1D_ARRAY:
 		case glu::TYPE_UINT_SAMPLER_2D:
 		case glu::TYPE_UINT_SAMPLER_CUBE:
 		case glu::TYPE_UINT_SAMPLER_2D_ARRAY:
@@ -397,6 +410,7 @@ static glu::DataType getSamplerCoordType (glu::DataType samplerType)
 	switch (texType)
 	{
 		case TEXTURE_TYPE_1D:		numCoords = 1;	break;
+		case TEXTURE_TYPE_1D_ARRAY:	numCoords = 2;	break;
 		case TEXTURE_TYPE_2D:		numCoords = 2;	break;
 		case TEXTURE_TYPE_2D_ARRAY:	numCoords = 3;	break;
 		case TEXTURE_TYPE_CUBE:		numCoords = 3;	break;
@@ -405,7 +419,9 @@ static glu::DataType getSamplerCoordType (glu::DataType samplerType)
 			DE_ASSERT(false);
 	}
 
-	if (isShadowSampler(samplerType))
+	if (samplerType == glu::TYPE_SAMPLER_1D_SHADOW)
+		numCoords = 3;
+	else if (isShadowSampler(samplerType))
 		numCoords += 1;
 
 	DE_ASSERT(de::inRange(numCoords, 1, 4));
@@ -438,7 +454,8 @@ static vk::VkImageType getVkImageType (TextureType texType)
 {
 	switch (texType)
 	{
-		case TEXTURE_TYPE_1D:			return vk::VK_IMAGE_TYPE_1D;
+		case TEXTURE_TYPE_1D:
+		case TEXTURE_TYPE_1D_ARRAY:		return vk::VK_IMAGE_TYPE_1D;
 		case TEXTURE_TYPE_2D:
 		case TEXTURE_TYPE_2D_ARRAY:		return vk::VK_IMAGE_TYPE_2D;
 		case TEXTURE_TYPE_CUBE:			return vk::VK_IMAGE_TYPE_2D;
@@ -454,6 +471,7 @@ static vk::VkImageViewType getVkImageViewType (TextureType texType)
 	switch (texType)
 	{
 		case TEXTURE_TYPE_1D:			return vk::VK_IMAGE_VIEW_TYPE_1D;
+		case TEXTURE_TYPE_1D_ARRAY:		return vk::VK_IMAGE_VIEW_TYPE_1D_ARRAY;
 		case TEXTURE_TYPE_2D:			return vk::VK_IMAGE_VIEW_TYPE_2D;
 		case TEXTURE_TYPE_2D_ARRAY:		return vk::VK_IMAGE_VIEW_TYPE_2D_ARRAY;
 		case TEXTURE_TYPE_CUBE:			return vk::VK_IMAGE_VIEW_TYPE_CUBE;
@@ -575,15 +593,6 @@ TestImage::TestImage (Context& context, TextureType texType, tcu::TextureFormat 
 	flushMappedMemoryRange(vkd, device, alloc->getMemory(), alloc->getOffset(), VK_WHOLE_SIZE);
 
 	{
-		const Unique<VkCommandPool>		cmdPool			(createCommandPool(vkd, device, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, context.getUniversalQueueFamilyIndex()));
-		const Unique<VkCommandBuffer>	cmdBuf			(allocateCommandBuffer(vkd, device, *cmdPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY));
-		const VkCommandBufferBeginInfo	beginInfo		=
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-			DE_NULL,
-			(VkCommandBufferUsageFlags)VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-			(const VkCommandBufferInheritanceInfo*)DE_NULL,
-		};
 		const VkImageAspectFlags		imageAspect		= (VkImageAspectFlags)(format.order == tcu::TextureFormat::D ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT);
 		const VkBufferImageCopy			copyInfo		=
 		{
@@ -599,87 +608,8 @@ TestImage::TestImage (Context& context, TextureType texType, tcu::TextureFormat 
 			{ 0u, 0u, 0u },
 			{ 1u, 1u, 1u }
 		};
-		const VkImageMemoryBarrier		preCopyBarrier	=
-		{
-			VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			DE_NULL,
-			(VkAccessFlags)0u,
-			(VkAccessFlags)VK_ACCESS_TRANSFER_WRITE_BIT,
-			VK_IMAGE_LAYOUT_UNDEFINED,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			VK_QUEUE_FAMILY_IGNORED,
-			VK_QUEUE_FAMILY_IGNORED,
-			*m_image,
-			{
-				imageAspect,
-				0u,
-				1u,
-				0u,
-				numLayers
-			}
-		};
-		const VkImageMemoryBarrier		postCopyBarrier	=
-		{
-			VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			DE_NULL,
-			(VkAccessFlags)VK_ACCESS_TRANSFER_WRITE_BIT,
-			(VkAccessFlags)VK_ACCESS_SHADER_READ_BIT,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_QUEUE_FAMILY_IGNORED,
-			VK_QUEUE_FAMILY_IGNORED,
-			*m_image,
-			{
-				imageAspect,
-				0u,
-				1u,
-				0u,
-				numLayers
-			}
-		};
 
-		VK_CHECK(vkd.beginCommandBuffer(*cmdBuf, &beginInfo));
-		vkd.cmdPipelineBarrier(*cmdBuf,
-							   (VkPipelineStageFlags)VK_PIPELINE_STAGE_HOST_BIT,
-							   (VkPipelineStageFlags)VK_PIPELINE_STAGE_TRANSFER_BIT,
-							   (VkDependencyFlags)0u,
-							   0u,
-							   (const VkMemoryBarrier*)DE_NULL,
-							   0u,
-							   (const VkBufferMemoryBarrier*)DE_NULL,
-							   1u,
-							   &preCopyBarrier);
-		vkd.cmdCopyBufferToImage(*cmdBuf, *stagingBuffer, *m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copyInfo);
-		vkd.cmdPipelineBarrier(*cmdBuf,
-							   (VkPipelineStageFlags)VK_PIPELINE_STAGE_TRANSFER_BIT,
-							   (VkPipelineStageFlags)VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
-							   (VkDependencyFlags)0u,
-							   0u,
-							   (const VkMemoryBarrier*)DE_NULL,
-							   0u,
-							   (const VkBufferMemoryBarrier*)DE_NULL,
-							   1u,
-							   &postCopyBarrier);
-		VK_CHECK(vkd.endCommandBuffer(*cmdBuf));
-
-		{
-			const Unique<VkFence>	fence		(createFence(vkd, device));
-			const VkSubmitInfo		submitInfo	=
-			{
-				VK_STRUCTURE_TYPE_SUBMIT_INFO,
-				DE_NULL,
-				0u,
-				(const VkSemaphore*)DE_NULL,
-				(const VkPipelineStageFlags*)DE_NULL,
-				1u,
-				&cmdBuf.get(),
-				0u,
-				(const VkSemaphore*)DE_NULL,
-			};
-
-			VK_CHECK(vkd.queueSubmit(context.getUniversalQueue(), 1u, &submitInfo, *fence));
-			VK_CHECK(vkd.waitForFences(device, 1u, &fence.get(), VK_TRUE, ~0ull));
-		}
+		copyBufferToImage(vkd, device, context.getUniversalQueue(), context.getUniversalQueueFamilyIndex(), *stagingBuffer, stagingBufferSize, vector<VkBufferImageCopy>(1, copyInfo), DE_NULL, imageAspect, 1u, numLayers, *m_image);
 	}
 }
 
@@ -1279,7 +1209,7 @@ tcu::TestStatus BlockArrayIndexingCaseInstance::iterate (void)
 
 	if ((m_flags & FLAG_USE_STORAGE_BUFFER) != 0)
 	{
-		if (!de::contains(m_context.getDeviceExtensions().begin(), m_context.getDeviceExtensions().end(), "VK_KHR_storage_buffer_storage_class"))
+		if (!isDeviceExtensionSupported(m_context.getUsedApiVersion(), m_context.getDeviceExtensions(), "VK_KHR_storage_buffer_storage_class"))
 			TCU_THROW(NotSupportedError, "VK_KHR_storage_buffer_storage_class is not supported");
 	}
 
@@ -1509,7 +1439,7 @@ void BlockArrayIndexingCase::createShaderSpec (void)
 	const char*			instanceName	= "block";
 	const char*			indicesPrefix	= "index";
 	const char*			resultPrefix	= "result";
-	const char*			interfaceName	= m_blockType == BLOCKTYPE_UNIFORM ? "uniform" : "buffer";
+	const char*			interfaceName	= m_blockType == BLOCKTYPE_UNIFORM ? "uniform" : "readonly buffer";
 	std::ostringstream	global, code;
 
 	for (int readNdx = 0; readNdx < numReads; readNdx++)
@@ -2026,22 +1956,25 @@ void OpaqueTypeIndexingTests::init (void)
 	{
 		static const glu::DataType samplerTypes[] =
 		{
-			// \note 1D images will be added by a later extension.
-//			glu::TYPE_SAMPLER_1D,
+			glu::TYPE_SAMPLER_1D,
+			glu::TYPE_SAMPLER_1D_ARRAY,
+			glu::TYPE_SAMPLER_1D_ARRAY_SHADOW,
 			glu::TYPE_SAMPLER_2D,
 			glu::TYPE_SAMPLER_CUBE,
 			glu::TYPE_SAMPLER_2D_ARRAY,
 			glu::TYPE_SAMPLER_3D,
-//			glu::TYPE_SAMPLER_1D_SHADOW,
+			glu::TYPE_SAMPLER_1D_SHADOW,
 			glu::TYPE_SAMPLER_2D_SHADOW,
 			glu::TYPE_SAMPLER_CUBE_SHADOW,
 			glu::TYPE_SAMPLER_2D_ARRAY_SHADOW,
-//			glu::TYPE_INT_SAMPLER_1D,
+			glu::TYPE_INT_SAMPLER_1D,
+			glu::TYPE_INT_SAMPLER_1D_ARRAY,
 			glu::TYPE_INT_SAMPLER_2D,
 			glu::TYPE_INT_SAMPLER_CUBE,
 			glu::TYPE_INT_SAMPLER_2D_ARRAY,
 			glu::TYPE_INT_SAMPLER_3D,
-//			glu::TYPE_UINT_SAMPLER_1D,
+			glu::TYPE_UINT_SAMPLER_1D,
+			glu::TYPE_UINT_SAMPLER_1D_ARRAY,
 			glu::TYPE_UINT_SAMPLER_2D,
 			glu::TYPE_UINT_SAMPLER_CUBE,
 			glu::TYPE_UINT_SAMPLER_2D_ARRAY,
@@ -2103,20 +2036,10 @@ void OpaqueTypeIndexingTests::init (void)
 				const glu::ShaderType	shaderType		= shaderTypes[shaderTypeNdx].type;
 				const std::string		name			= std::string(indexExprName) + "_" + shaderTypes[shaderTypeNdx].name;
 
-				// \note [pyry] In Vulkan CTS 1.0.2 ubo/ssbo/atomic_counter groups should not cover tess/geom stages
-				if ((shaderType == glu::SHADERTYPE_VERTEX)		||
-					(shaderType == glu::SHADERTYPE_FRAGMENT)	||
-					(shaderType == glu::SHADERTYPE_COMPUTE))
-				{
-					uboGroup->addChild	(new BlockArrayIndexingCase		(m_testCtx, name.c_str(), indexExprDesc, BLOCKTYPE_UNIFORM,	indexExprType, shaderType));
-					acGroup->addChild	(new AtomicCounterIndexingCase	(m_testCtx, name.c_str(), indexExprDesc, indexExprType, shaderType));
-
-					if (indexExprType == INDEX_EXPR_TYPE_CONST_LITERAL || indexExprType == INDEX_EXPR_TYPE_CONST_EXPRESSION)
-						ssboGroup->addChild	(new BlockArrayIndexingCase	(m_testCtx, name.c_str(), indexExprDesc, BLOCKTYPE_BUFFER, indexExprType, shaderType));
-				}
-
-				if (indexExprType == INDEX_EXPR_TYPE_CONST_LITERAL || indexExprType == INDEX_EXPR_TYPE_CONST_EXPRESSION)
-					ssboStorageBufGroup->addChild	(new BlockArrayIndexingCase	(m_testCtx, name.c_str(), indexExprDesc, BLOCKTYPE_BUFFER, indexExprType, shaderType, (deUint32)BlockArrayIndexingCaseInstance::FLAG_USE_STORAGE_BUFFER));
+				uboGroup->addChild	(new BlockArrayIndexingCase		(m_testCtx, name.c_str(), indexExprDesc, BLOCKTYPE_UNIFORM,	indexExprType, shaderType));
+				acGroup->addChild	(new AtomicCounterIndexingCase	(m_testCtx, name.c_str(), indexExprDesc, indexExprType, shaderType));
+				ssboGroup->addChild	(new BlockArrayIndexingCase	(m_testCtx, name.c_str(), indexExprDesc, BLOCKTYPE_BUFFER, indexExprType, shaderType));
+				ssboStorageBufGroup->addChild	(new BlockArrayIndexingCase	(m_testCtx, name.c_str(), indexExprDesc, BLOCKTYPE_BUFFER, indexExprType, shaderType, (deUint32)BlockArrayIndexingCaseInstance::FLAG_USE_STORAGE_BUFFER));
 			}
 		}
 	}

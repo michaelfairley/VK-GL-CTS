@@ -33,10 +33,12 @@
 #include "vkStrUtil.hpp"
 #include "vkRefUtil.hpp"
 #include "vkQueryUtil.hpp"
+#include "vkBarrierUtil.hpp"
 #include "vkMemUtil.hpp"
 #include "vkDeviceUtil.hpp"
 #include "vkTypeUtil.hpp"
 #include "vkBuilderUtil.hpp"
+#include "vkCmdUtil.hpp"
 
 #include "tcuTestLog.hpp"
 #include "tcuFormatUtil.hpp"
@@ -234,7 +236,7 @@ string ComputeBuiltinVarCase::genBuiltinVarSource (const string& varName, glu::D
 					<< "	sb_out.result[offset].x = " << varName << ".x;\n";
 				break;
 			default:
-				DE_ASSERT("Illegal data type");
+				DE_FATAL("Illegal data type");
 				break;
 		}
 	} else {
@@ -432,7 +434,7 @@ tcu::TestStatus	ComputeBuiltinVarInstance::iterate (void)
 			resultBufferStride = sizeof(tcu::UVec4);
 			break;
 		default:
-			DE_ASSERT("Illegal data type");
+			DE_FATAL("Illegal data type");
 	}
 
 	const deUint32				resultBufferSize	= numInvocations * resultBufferStride;
@@ -444,7 +446,7 @@ tcu::TestStatus	ComputeBuiltinVarInstance::iterate (void)
 	{
 		const Allocation& alloc = uniformBuffer.getAllocation();
 		memcpy(alloc.getHostPtr(), &stride, sizeOfUniformBuffer);
-		flushMappedMemoryRange(m_vki, m_device, alloc.getMemory(), alloc.getOffset(), sizeOfUniformBuffer);
+		flushAlloc(m_vki, m_device, alloc);
 	}
 
 	// Create descriptorSetLayout
@@ -503,7 +505,7 @@ tcu::TestStatus	ComputeBuiltinVarInstance::iterate (void)
 	submitCommandsAndWait(m_vki, m_device, m_queue, *cmdBuffer);
 
 	const Allocation& resultAlloc = resultBuffer.getAllocation();
-	invalidateMappedMemoryRange(m_vki, m_device, resultAlloc.getMemory(), resultAlloc.getOffset(), resultBufferSize);
+	invalidateAlloc(m_vki, m_device, resultAlloc);
 
 	const deUint8*	 ptr = reinterpret_cast<deUint8*>(resultAlloc.getHostPtr());
 

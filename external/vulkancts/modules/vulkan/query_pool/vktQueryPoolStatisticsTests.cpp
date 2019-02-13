@@ -30,6 +30,8 @@
 #include "vkBuilderUtil.hpp"
 #include "vkRefUtil.hpp"
 #include "vkPrograms.hpp"
+#include "vkTypeUtil.hpp"
+#include "vkCmdUtil.hpp"
 
 #include "deMath.h"
 
@@ -105,18 +107,6 @@ std::string outputTypeToGLString (const VkPrimitiveTopology& outputType)
 	}
 }
 
-void beginCommandBuffer (const DeviceInterface& vk, const VkCommandBuffer commandBuffer)
-{
-	const VkCommandBufferBeginInfo info =
-	{
-		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,		// VkStructureType							sType;
-		DE_NULL,											// const void*								pNext;
-		VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,		// VkCommandBufferUsageFlags				flags;
-		DE_NULL,											// const VkCommandBufferInheritanceInfo*	pInheritanceInfo;
-	};
-	VK_CHECK(vk.beginCommandBuffer(commandBuffer, &info));
-}
-
 void beginSecondaryCommandBuffer (const DeviceInterface&				vk,
 								  const VkCommandBuffer					commandBuffer,
 								  const VkQueryPipelineStatisticFlags	queryFlags,
@@ -144,35 +134,6 @@ void beginSecondaryCommandBuffer (const DeviceInterface&				vk,
 		&secCmdBufInheritInfo,							// const VkCommandBufferInheritanceInfo*	pInheritanceInfo;
 	};
 	VK_CHECK(vk.beginCommandBuffer(commandBuffer, &info));
-}
-
-void submitCommandsAndWait (const DeviceInterface&	vk,
-							const VkDevice			device,
-							const VkQueue			queue,
-							const VkCommandBuffer	commandBuffer)
-{
-	const VkFenceCreateInfo	fenceInfo	=
-	{
-		VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,	// VkStructureType		sType;
-		DE_NULL,								// const void*			pNext;
-		(VkFenceCreateFlags)0,					// VkFenceCreateFlags	flags;
-	};
-	const Unique<VkFence>	fence		(createFence(vk, device, &fenceInfo));
-
-	const VkSubmitInfo		submitInfo	=
-	{
-		VK_STRUCTURE_TYPE_SUBMIT_INFO,	// VkStructureType				sType;
-		DE_NULL,						// const void*					pNext;
-		0u,								// uint32_t						waitSemaphoreCount;
-		DE_NULL,						// const VkSemaphore*			pWaitSemaphores;
-		DE_NULL,						// const VkPipelineStageFlags*	pWaitDstStageMask;
-		1u,								// uint32_t						commandBufferCount;
-		&commandBuffer,					// const VkCommandBuffer*		pCommandBuffers;
-		0u,								// uint32_t						signalSemaphoreCount;
-		DE_NULL,						// const VkSemaphore*			pSignalSemaphores;
-	};
-	VK_CHECK(vk.queueSubmit(queue, 1u, &submitInfo, *fence));
-	VK_CHECK(vk.waitForFences(device, 1u, &fence.get(), DE_TRUE, ~0ull));
 }
 
 Move<VkQueryPool> makeQueryPool (const DeviceInterface& vk, const VkDevice device, VkQueryPipelineStatisticFlags statisticFlags)
@@ -325,15 +286,15 @@ tcu::TestStatus ComputeInvocationsTestInstance::executeTest (const VkCommandPool
 	const VkQueue						queue					= m_context.getUniversalQueue();
 	const VkBufferMemoryBarrier			computeFinishBarrier	=
 	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,	// VkStructureType	sType;
-		DE_NULL,									// const void*		pNext;
-		VK_ACCESS_SHADER_WRITE_BIT,					// VkAccessFlags	srcAccessMask;
-		VK_ACCESS_HOST_READ_BIT,					// VkAccessFlags	dstAccessMask;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			srcQueueFamilyIndex;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			destQueueFamilyIndex;
-		buffer->object(),							// VkBuffer			buffer;
-		0ull,										// VkDeviceSize		offset;
-		bufferSizeBytes,							// VkDeviceSize		size;
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,					// VkStructureType	sType;
+		DE_NULL,													// const void*		pNext;
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,		// VkAccessFlags	srcAccessMask;
+		VK_ACCESS_HOST_READ_BIT,									// VkAccessFlags	dstAccessMask;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			srcQueueFamilyIndex;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			destQueueFamilyIndex;
+		buffer->object(),											// VkBuffer			buffer;
+		0ull,														// VkDeviceSize		offset;
+		bufferSizeBytes,											// VkDeviceSize		size;
 	};
 
 	for(size_t parametersNdx = 0u; parametersNdx < m_parameters.size(); ++parametersNdx)
@@ -380,7 +341,7 @@ tcu::TestStatus ComputeInvocationsTestInstance::executeTest (const VkCommandPool
 
 			vk.cmdPipelineBarrier(*cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
 				(VkDependencyFlags)0u, 0u, (const VkMemoryBarrier*)DE_NULL, 1u, &computeFinishBarrier, 0u, (const VkImageMemoryBarrier*)DE_NULL);
-		VK_CHECK(vk.endCommandBuffer(*cmdBuffer));
+		endCommandBuffer(vk, *cmdBuffer);
 
 		m_context.getTestContext().getLog() << tcu::TestLog::Message << "Compute shader invocations: " << getComputeExecution(m_parameters[parametersNdx]) << tcu::TestLog::EndMessage;
 
@@ -443,28 +404,28 @@ tcu::TestStatus ComputeInvocationsSecondaryTestInstance::executeTest (const VkCo
 
 	const VkBufferMemoryBarrier				computeShaderWriteBarrier	=
 	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,	// VkStructureType	sType;
-		DE_NULL,									// const void*		pNext;
-		VK_ACCESS_SHADER_WRITE_BIT,					// VkAccessFlags	srcAccessMask;
-		VK_ACCESS_SHADER_WRITE_BIT,					// VkAccessFlags	dstAccessMask;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			srcQueueFamilyIndex;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			destQueueFamilyIndex;
-		buffer->object(),							// VkBuffer			buffer;
-		0ull,										// VkDeviceSize		offset;
-		bufferSizeBytes,							// VkDeviceSize		size;
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,					// VkStructureType	sType;
+		DE_NULL,													// const void*		pNext;
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,		// VkAccessFlags	srcAccessMask;
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,		// VkAccessFlags	dstAccessMask;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			srcQueueFamilyIndex;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			destQueueFamilyIndex;
+		buffer->object(),											// VkBuffer			buffer;
+		0ull,														// VkDeviceSize		offset;
+		bufferSizeBytes,											// VkDeviceSize		size;
 	};
 
 	const VkBufferMemoryBarrier				computeFinishBarrier		=
 	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,	// VkStructureType	sType;
-		DE_NULL,									// const void*		pNext;
-		VK_ACCESS_SHADER_WRITE_BIT,					// VkAccessFlags	srcAccessMask;
-		VK_ACCESS_HOST_READ_BIT,					// VkAccessFlags	dstAccessMask;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			srcQueueFamilyIndex;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			destQueueFamilyIndex;
-		buffer->object(),							// VkBuffer			buffer;
-		0ull,										// VkDeviceSize		offset;
-		bufferSizeBytes,							// VkDeviceSize		size;
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,					// VkStructureType	sType;
+		DE_NULL,													// const void*		pNext;
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,		// VkAccessFlags	srcAccessMask;
+		VK_ACCESS_HOST_READ_BIT,									// VkAccessFlags	dstAccessMask;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			srcQueueFamilyIndex;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			destQueueFamilyIndex;
+		buffer->object(),											// VkBuffer			buffer;
+		0ull,														// VkDeviceSize		offset;
+		bufferSizeBytes,											// VkDeviceSize		size;
 	};
 
 	std::vector<VkShaderModuleSp>			shaderModule;
@@ -515,7 +476,7 @@ tcu::TestStatus ComputeInvocationsSecondaryTestInstance::executeTest (const VkCo
 					(VkDependencyFlags)0u, 0u, (const VkMemoryBarrier*)DE_NULL, 1u, &computeShaderWriteBarrier, 0u, (const VkImageMemoryBarrier*)DE_NULL);
 		}
 		vk.cmdEndQuery(*secondaryCmdBuffer, *queryPool, 0u);
-	VK_CHECK(vk.endCommandBuffer(*secondaryCmdBuffer));
+	endCommandBuffer(vk, *secondaryCmdBuffer);
 
 	beginCommandBuffer(vk, *primaryCmdBuffer);
 		vk.cmdExecuteCommands(*primaryCmdBuffer, 1u, &secondaryCmdBuffer.get());
@@ -523,7 +484,7 @@ tcu::TestStatus ComputeInvocationsSecondaryTestInstance::executeTest (const VkCo
 		vk.cmdPipelineBarrier(*primaryCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
 			(VkDependencyFlags)0u, 0u, (const VkMemoryBarrier*)DE_NULL, 1u, &computeFinishBarrier, 0u, (const VkImageMemoryBarrier*)DE_NULL);
 
-	VK_CHECK(vk.endCommandBuffer(*primaryCmdBuffer));
+	endCommandBuffer(vk, *primaryCmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *primaryCmdBuffer);
@@ -601,28 +562,28 @@ tcu::TestStatus ComputeInvocationsSecondaryInheritedTestInstance::executeTest (c
 
 	const VkBufferMemoryBarrier					computeShaderWriteBarrier		=
 	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,	// VkStructureType	sType;
-		DE_NULL,									// const void*		pNext;
-		VK_ACCESS_SHADER_WRITE_BIT,					// VkAccessFlags	srcAccessMask;
-		VK_ACCESS_SHADER_WRITE_BIT,					// VkAccessFlags	dstAccessMask;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			srcQueueFamilyIndex;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			destQueueFamilyIndex;
-		buffer->object(),							// VkBuffer			buffer;
-		0ull,										// VkDeviceSize		offset;
-		bufferSizeBytes,							// VkDeviceSize		size;
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,					// VkStructureType	sType;
+		DE_NULL,													// const void*		pNext;
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,		// VkAccessFlags	srcAccessMask;
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,		// VkAccessFlags	dstAccessMask;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			srcQueueFamilyIndex;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			destQueueFamilyIndex;
+		buffer->object(),											// VkBuffer			buffer;
+		0ull,														// VkDeviceSize		offset;
+		bufferSizeBytes,											// VkDeviceSize		size;
 	};
 
 	const VkBufferMemoryBarrier					computeFinishBarrier			=
 	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,	// VkStructureType	sType;
-		DE_NULL,									// const void*		pNext;
-		VK_ACCESS_SHADER_WRITE_BIT,					// VkAccessFlags	srcAccessMask;
-		VK_ACCESS_HOST_READ_BIT,					// VkAccessFlags	dstAccessMask;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			srcQueueFamilyIndex;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			destQueueFamilyIndex;
-		buffer->object(),							// VkBuffer			buffer;
-		0ull,										// VkDeviceSize		offset;
-		bufferSizeBytes,							// VkDeviceSize		size;
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,					// VkStructureType	sType;
+		DE_NULL,													// const void*		pNext;
+		VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,		// VkAccessFlags	srcAccessMask;
+		VK_ACCESS_HOST_READ_BIT,									// VkAccessFlags	dstAccessMask;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			srcQueueFamilyIndex;
+		VK_QUEUE_FAMILY_IGNORED,									// deUint32			destQueueFamilyIndex;
+		buffer->object(),											// VkBuffer			buffer;
+		0ull,														// VkDeviceSize		offset;
+		bufferSizeBytes,											// VkDeviceSize		size;
 	};
 
 	std::vector<VkShaderModuleSp>				shaderModule;
@@ -670,7 +631,7 @@ tcu::TestStatus ComputeInvocationsSecondaryInheritedTestInstance::executeTest (c
 				vk.cmdPipelineBarrier(*secondaryCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 					(VkDependencyFlags)0u, 0u, (const VkMemoryBarrier*)DE_NULL, 1u, &computeShaderWriteBarrier, 0u, (const VkImageMemoryBarrier*)DE_NULL);
 		}
-	VK_CHECK(vk.endCommandBuffer(*secondaryCmdBuffer));
+	endCommandBuffer(vk, *secondaryCmdBuffer);
 
 	beginCommandBuffer(vk, *primaryCmdBuffer);
 		vk.cmdResetQueryPool(*primaryCmdBuffer, *queryPool, 0u, 1u);
@@ -689,7 +650,7 @@ tcu::TestStatus ComputeInvocationsSecondaryInheritedTestInstance::executeTest (c
 			(VkDependencyFlags)0u, 0u, (const VkMemoryBarrier*)DE_NULL, 1u, &computeFinishBarrier, 0u, (const VkImageMemoryBarrier*)DE_NULL);
 
 		vk.cmdEndQuery(*primaryCmdBuffer, *queryPool, 0u);
-	VK_CHECK(vk.endCommandBuffer(*primaryCmdBuffer));
+	endCommandBuffer(vk, *primaryCmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *primaryCmdBuffer);
@@ -795,7 +756,7 @@ void GraphicBasicTestInstance::creatColorAttachmentAndRenderPass (void)
 		const ImageCreateInfo		colorImageCreateInfo	(VK_IMAGE_TYPE_2D, m_colorAttachmentFormat, imageExtent, 1, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL,
 															VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 
-		m_colorAttachmentImage	= Image::createAndAlloc(vk, device, colorImageCreateInfo, m_context.getDefaultAllocator());
+		m_colorAttachmentImage	= Image::createAndAlloc(vk, device, colorImageCreateInfo, m_context.getDefaultAllocator(), m_context.getUniversalQueueFamilyIndex());
 
 		const ImageViewCreateInfo	attachmentViewInfo		(m_colorAttachmentImage->object(), VK_IMAGE_VIEW_TYPE_2D, m_colorAttachmentFormat);
 		m_attachmentView			= createImageView(vk, device, &attachmentViewInfo);
@@ -803,7 +764,7 @@ void GraphicBasicTestInstance::creatColorAttachmentAndRenderPass (void)
 		ImageCreateInfo				depthImageCreateInfo	(vk::VK_IMAGE_TYPE_2D, VK_FORMAT_D16_UNORM, imageExtent, 1, 1, vk::VK_SAMPLE_COUNT_1_BIT, vk::VK_IMAGE_TILING_OPTIMAL,
 															 vk::VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
 
-		m_depthImage				= Image::createAndAlloc(vk, device, depthImageCreateInfo, m_context.getDefaultAllocator());
+		m_depthImage				= Image::createAndAlloc(vk, device, depthImageCreateInfo, m_context.getDefaultAllocator(), m_context.getUniversalQueueFamilyIndex());
 
 		// Construct a depth  view from depth image
 		const ImageViewCreateInfo	depthViewInfo			(m_depthImage->object(), vk::VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D16_UNORM);
@@ -972,27 +933,8 @@ void VertexShaderTestInstance::createPipeline (void)
 	pipelineCreateInfo.addState(PipelineCreateInfo::InputAssemblerState(m_parametersGraphic.primitiveTopology));
 	pipelineCreateInfo.addState(PipelineCreateInfo::ColorBlendState(1, &attachmentState));
 
-	const VkViewport	viewport	=
-	{
-		0.0f,		// float x;
-		0.0f,		// float y;
-		WIDTH,	// float width;
-		HEIGHT,	// float height;
-		0.0f,	// float minDepth;
-		1.0f	// float maxDepth;
-	};
-
-	const VkRect2D		scissor		=
-	{
-		{
-			0,		// deInt32 x
-			0,		// deInt32 y
-		},		// VkOffset2D	offset;
-		{
-			WIDTH,	// deInt32 width;
-			HEIGHT,	// deInt32 height
-		},		// VkExtent2D	extent;
-	};
+	const VkViewport	viewport	= makeViewport(WIDTH, HEIGHT);
+	const VkRect2D		scissor		= makeRect2D(WIDTH, HEIGHT);
 	pipelineCreateInfo.addState(PipelineCreateInfo::ViewportState(1u, std::vector<VkViewport>(1, viewport), std::vector<VkRect2D>(1, scissor)));
 	pipelineCreateInfo.addState(PipelineCreateInfo::DepthStencilState());
 	pipelineCreateInfo.addState(PipelineCreateInfo::RasterizerState());
@@ -1020,17 +962,17 @@ tcu::TestStatus VertexShaderTestInstance::executeTest (void)
 
 	beginCommandBuffer(vk, *cmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *cmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *cmdBuffer, m_depthImage->object(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdResetQueryPool(*cmdBuffer, *queryPool, 0u, 1u);
 
-		vk.cmdBeginRenderPass(*cmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+		beginRenderPass(vk, *cmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0]);
 
 		vk.cmdBeginQuery(*cmdBuffer, *queryPool, 0u, (VkQueryControlFlags)0u);
 		vk.cmdBindVertexBuffers(*cmdBuffer, 0, 1, &vertexBuffer, &vertexBufferOffset);
@@ -1038,11 +980,12 @@ tcu::TestStatus VertexShaderTestInstance::executeTest (void)
 		draw(*cmdBuffer);
 		vk.cmdEndQuery(*cmdBuffer, *queryPool, 0u);
 
-		vk.cmdEndRenderPass(*cmdBuffer);
+		endRenderPass(vk, *cmdBuffer);
 
-		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0u, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*cmdBuffer);
+	endCommandBuffer(vk, *cmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *cmdBuffer);
@@ -1055,12 +998,11 @@ tcu::TestStatus VertexShaderTestInstance::checkResult (VkQueryPool queryPool)
 	const VkDevice			device		= m_context.getDevice();
 	deUint64				result		= 0u;
 	deUint64				expectedMin	= 0u;
-	deUint64				expectedMax	= 0u;
+
 	switch(m_parametersGraphic.queryStatisticFlags)
 	{
 		case VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT:
 			expectedMin = 16u;
-			expectedMax = expectedMin + 3u;
 			break;
 		case VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT:
 			expectedMin =	m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST					? 15u :
@@ -1069,7 +1011,6 @@ tcu::TestStatus VertexShaderTestInstance::checkResult (VkQueryPool queryPool)
 							m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY		?  6u :
 							m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP_WITH_ADJACENCY	?  8u :
 							16u;
-			expectedMax =	m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY		? 12u : 19u;
 			break;
 		case VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT:
 			expectedMin =	m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST						? 16u :
@@ -1083,7 +1024,6 @@ tcu::TestStatus VertexShaderTestInstance::checkResult (VkQueryPool queryPool)
 							m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY		?  2u :
 							m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP_WITH_ADJACENCY	?  6u :
 							0u;
-			expectedMax = expectedMin + 3u;
 			break;
 		case VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT:
 			expectedMin =	m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST						?     9u :
@@ -1097,7 +1037,6 @@ tcu::TestStatus VertexShaderTestInstance::checkResult (VkQueryPool queryPool)
 							m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY		?   992u :
 							m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP_WITH_ADJACENCY	?  3072u :
 							0u;
-			expectedMax = 4u * expectedMin;
 			break;
 		default:
 			DE_ASSERT(0);
@@ -1105,7 +1044,7 @@ tcu::TestStatus VertexShaderTestInstance::checkResult (VkQueryPool queryPool)
 	}
 
 	VK_CHECK(vk.getQueryPoolResults(device, queryPool, 0u, 1u, sizeof(deUint64), &result, 0u, VK_QUERY_RESULT_64_BIT));
-	if (result < expectedMin || result > expectedMax)
+	if (result < expectedMin)
 		return tcu::TestStatus::fail("QueryPoolResults incorrect");
 
 	if (m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP && !checkImage())
@@ -1179,26 +1118,27 @@ tcu::TestStatus VertexShaderSecondaryTestInstance::executeTest (void)
 		vk.cmdBindVertexBuffers(*secondaryCmdBuffer, 0u, 1u, &vertexBuffer, &vertexBufferOffset);
 		draw(*secondaryCmdBuffer);
 		vk.cmdEndQuery(*secondaryCmdBuffer, *queryPool, 0u);
-	vk.endCommandBuffer(*secondaryCmdBuffer);
+	endCommandBuffer(vk, *secondaryCmdBuffer);
 
 	beginCommandBuffer(vk, *primaryCmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  vk::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, vk::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), vk::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  vk::VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, vk::VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | vk::VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdResetQueryPool(*primaryCmdBuffer, *queryPool, 0u, 1u);
 
-		vk.cmdBeginRenderPass(*primaryCmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+		beginRenderPass(vk, *primaryCmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0], VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 		vk.cmdExecuteCommands(*primaryCmdBuffer, 1u, &secondaryCmdBuffer.get());
-		vk.cmdEndRenderPass(*primaryCmdBuffer);
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		endRenderPass(vk, *primaryCmdBuffer);
+		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*primaryCmdBuffer);
+	endCommandBuffer(vk, *primaryCmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *primaryCmdBuffer);
@@ -1248,28 +1188,29 @@ tcu::TestStatus VertexShaderSecondaryInheritedTestInstance::executeTest (void)
 		vk.cmdBindPipeline(*secondaryCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *m_pipeline);
 		vk.cmdBindVertexBuffers(*secondaryCmdBuffer, 0u, 1u, &vertexBuffer, &vertexBufferOffset);
 		draw(*secondaryCmdBuffer);
-	vk.endCommandBuffer(*secondaryCmdBuffer);
+	endCommandBuffer(vk, *secondaryCmdBuffer);
 
 	beginCommandBuffer(vk, *primaryCmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdResetQueryPool(*primaryCmdBuffer, *queryPool, 0u, 1u);
 		vk.cmdBeginQuery(*primaryCmdBuffer, *queryPool, 0u, (VkQueryControlFlags)0u);
 
-		vk.cmdBeginRenderPass(*primaryCmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+		beginRenderPass(vk, *primaryCmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0], VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 		vk.cmdExecuteCommands(*primaryCmdBuffer, 1u, &secondaryCmdBuffer.get());
-		vk.cmdEndRenderPass(*primaryCmdBuffer);
+		endRenderPass(vk, *primaryCmdBuffer);
 		vk.cmdEndQuery(*primaryCmdBuffer, *queryPool, 0u);
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*primaryCmdBuffer);
+	endCommandBuffer(vk, *primaryCmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *primaryCmdBuffer);
@@ -1356,27 +1297,9 @@ void GeometryShaderTestInstance::createPipeline (void)
 	pipelineCreateInfo.addState(PipelineCreateInfo::InputAssemblerState(m_parametersGraphic.primitiveTopology));
 	pipelineCreateInfo.addState(PipelineCreateInfo::ColorBlendState(1, &attachmentState));
 
-	const VkViewport	viewport	=
-	{
-		0.0f,		// float x;
-		0.0f,		// float y;
-		WIDTH,	// float width;
-		HEIGHT,	// float height;
-		0.0f,	// float minDepth;
-		1.0f	// float maxDepth;
-	};
+	const VkViewport	viewport	= makeViewport(WIDTH, HEIGHT);
+	const VkRect2D		scissor		= makeRect2D(WIDTH, HEIGHT);
 
-	const VkRect2D		scissor		=
-	{
-		{
-			0,		// deInt32 x
-			0,		// deInt32 y
-		},		// VkOffset2D	offset;
-		{
-			WIDTH,	// deInt32 width;
-			HEIGHT,	// deInt32 height
-		},		// VkExtent2D	extent;
-	};
 	pipelineCreateInfo.addState(PipelineCreateInfo::ViewportState(1, std::vector<VkViewport>(1, viewport), std::vector<VkRect2D>(1, scissor)));
 
 	if (m_context.getDeviceFeatures().depthBounds)
@@ -1409,17 +1332,17 @@ tcu::TestStatus GeometryShaderTestInstance::executeTest (void)
 
 	beginCommandBuffer(vk, *cmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *cmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *cmdBuffer, m_depthImage->object(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdResetQueryPool(*cmdBuffer, *queryPool, 0u, 1u);
 
-		vk.cmdBeginRenderPass(*cmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+		beginRenderPass(vk, *cmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0]);
 
 		vk.cmdBeginQuery(*cmdBuffer, *queryPool, 0u, (VkQueryControlFlags)0u);
 		vk.cmdBindVertexBuffers(*cmdBuffer, 0, 1, &vertexBuffer, &vertexBufferOffset);
@@ -1429,11 +1352,12 @@ tcu::TestStatus GeometryShaderTestInstance::executeTest (void)
 
 		vk.cmdEndQuery(*cmdBuffer, *queryPool, 0u);
 
-		vk.cmdEndRenderPass(*cmdBuffer);
+		endRenderPass(vk, *cmdBuffer);
 
-		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*cmdBuffer);
+	endCommandBuffer(vk, *cmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *cmdBuffer);
@@ -1446,7 +1370,6 @@ tcu::TestStatus GeometryShaderTestInstance::checkResult (VkQueryPool queryPool)
 	const VkDevice			device		= m_context.getDevice();
 	deUint64				result		= 0u;
 	deUint64				expectedMin	= 0u;
-	deUint64				expectedMax	= 0u;
 
 	switch(m_parametersGraphic.queryStatisticFlags)
 	{
@@ -1483,10 +1406,8 @@ tcu::TestStatus GeometryShaderTestInstance::checkResult (VkQueryPool queryPool)
 		break;
 	}
 
-	expectedMax = expectedMin + 1;
-
 	VK_CHECK(vk.getQueryPoolResults(device, queryPool, 0u, 1u, sizeof(deUint64), &result, 0u, VK_QUERY_RESULT_64_BIT));
-	if (result < expectedMin || result > expectedMax)
+	if (result < expectedMin)
 		return tcu::TestStatus::fail("QueryPoolResults incorrect");
 
 	if ( (m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST || m_parametersGraphic.primitiveTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP ) && !checkImage())
@@ -1549,26 +1470,27 @@ tcu::TestStatus GeometryShaderSecondaryTestInstance::executeTest (void)
 		vk.cmdBindVertexBuffers(*secondaryCmdBuffer, 0u, 1u, &vertexBuffer, &vertexBufferOffset);
 		draw(*secondaryCmdBuffer);
 		vk.cmdEndQuery(*secondaryCmdBuffer, *queryPool, 0u);
-	vk.endCommandBuffer(*secondaryCmdBuffer);
+	endCommandBuffer(vk, *secondaryCmdBuffer);
 
 	beginCommandBuffer(vk, *primaryCmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdResetQueryPool(*primaryCmdBuffer, *queryPool, 0u, 1u);
-		vk.cmdBeginRenderPass(*primaryCmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+		beginRenderPass(vk, *primaryCmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0], VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 		vk.cmdExecuteCommands(*primaryCmdBuffer, 1u, &secondaryCmdBuffer.get());
-		vk.cmdEndRenderPass(*primaryCmdBuffer);
+		endRenderPass(vk, *primaryCmdBuffer);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*primaryCmdBuffer);
+	endCommandBuffer(vk, *primaryCmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *primaryCmdBuffer);
@@ -1618,28 +1540,29 @@ tcu::TestStatus GeometryShaderSecondaryInheritedTestInstance::executeTest (void)
 		vk.cmdBindPipeline(*secondaryCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *m_pipeline);
 		vk.cmdBindVertexBuffers(*secondaryCmdBuffer, 0u, 1u, &vertexBuffer, &vertexBufferOffset);
 		draw(*secondaryCmdBuffer);
-	vk.endCommandBuffer(*secondaryCmdBuffer);
+	endCommandBuffer(vk, *secondaryCmdBuffer);
 
 	beginCommandBuffer(vk, *primaryCmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdResetQueryPool(*primaryCmdBuffer, *queryPool, 0u, 1u);
 		vk.cmdBeginQuery(*primaryCmdBuffer, *queryPool, 0u, (VkQueryControlFlags)0u);
-		vk.cmdBeginRenderPass(*primaryCmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+		beginRenderPass(vk, *primaryCmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0], VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 		vk.cmdExecuteCommands(*primaryCmdBuffer, 1u, &secondaryCmdBuffer.get());
-		vk.cmdEndRenderPass(*primaryCmdBuffer);
+		endRenderPass(vk, *primaryCmdBuffer);
 		vk.cmdEndQuery(*primaryCmdBuffer, *queryPool, 0u);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*primaryCmdBuffer);
+	endCommandBuffer(vk, *primaryCmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *primaryCmdBuffer);
@@ -1730,27 +1653,9 @@ void TessellationShaderTestInstance::createPipeline (void)
 	pipelineCreateInfo.addState(PipelineCreateInfo::InputAssemblerState(VK_PRIMITIVE_TOPOLOGY_PATCH_LIST));
 	pipelineCreateInfo.addState(PipelineCreateInfo::ColorBlendState(1, &attachmentState));
 
-	const VkViewport	viewport	=
-	{
-		0.0f,		// float x;
-		0.0f,		// float y;
-		WIDTH,	// float width;
-		HEIGHT,	// float height;
-		0.0f,	// float minDepth;
-		1.0f	// float maxDepth;
-	};
+	const VkViewport	viewport	= makeViewport(WIDTH, HEIGHT);
+	const VkRect2D		scissor		= makeRect2D(WIDTH, HEIGHT);
 
-	const VkRect2D		scissor		=
-	{
-		{
-			0,		// deInt32 x
-			0,		// deInt32 y
-		},		// VkOffset2D	offset;
-		{
-			WIDTH,	// deInt32 width;
-			HEIGHT,	// deInt32 height
-		},		// VkExtent2D	extent;
-	};
 	pipelineCreateInfo.addState(PipelineCreateInfo::ViewportState(1, std::vector<VkViewport>(1, viewport), std::vector<VkRect2D>(1, scissor)));
 	pipelineCreateInfo.addState(PipelineCreateInfo::DepthStencilState());
 	pipelineCreateInfo.addState(PipelineCreateInfo::RasterizerState());
@@ -1778,17 +1683,17 @@ tcu::TestStatus	TessellationShaderTestInstance::executeTest (void)
 
 	beginCommandBuffer(vk, *cmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *cmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *cmdBuffer, m_depthImage->object(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdResetQueryPool(*cmdBuffer, *queryPool, 0u, 1u);
 
-		vk.cmdBeginRenderPass(*cmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+		beginRenderPass(vk, *cmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0]);
 
 		vk.cmdBeginQuery(*cmdBuffer, *queryPool, 0u, (VkQueryControlFlags)0u);
 		vk.cmdBindVertexBuffers(*cmdBuffer, 0, 1, &vertexBuffer, &vertexBufferOffset);
@@ -1798,11 +1703,12 @@ tcu::TestStatus	TessellationShaderTestInstance::executeTest (void)
 
 		vk.cmdEndQuery(*cmdBuffer, *queryPool, 0u);
 
-		vk.cmdEndRenderPass(*cmdBuffer);
+		endRenderPass(vk, *cmdBuffer);
 
-		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		transition2DImage(vk, *cmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*cmdBuffer);
+	endCommandBuffer(vk, *cmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *cmdBuffer);
@@ -1815,23 +1721,21 @@ tcu::TestStatus TessellationShaderTestInstance::checkResult (VkQueryPool queryPo
 	const VkDevice			device		= m_context.getDevice();
 	deUint64				result		= 0u;
 	deUint64				expectedMin	= 0u;
-	deUint64				expectedMax	= 0u;
+
 	switch(m_parametersGraphic.queryStatisticFlags)
 	{
 		case VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_CONTROL_SHADER_PATCHES_BIT:
 			expectedMin = 4u;
-			expectedMax = expectedMin * 4u;
 			break;
 		case VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_EVALUATION_SHADER_INVOCATIONS_BIT:
 			expectedMin = 100u;
-			expectedMax = expectedMin * 4u;
 			break;
 		default:
 			DE_ASSERT(0);
 			break;
 	}
 	VK_CHECK(vk.getQueryPoolResults(device, queryPool, 0u, 1u, sizeof(deUint64), &result, 0u, VK_QUERY_RESULT_64_BIT));
-	if (result < expectedMin || result > expectedMax)
+	if (result < expectedMin)
 		return tcu::TestStatus::fail("QueryPoolResults incorrect");
 
 	if (!checkImage())
@@ -1883,29 +1787,30 @@ tcu::TestStatus	TessellationShaderSecondrayTestInstance::executeTest (void)
 		vk.cmdBindVertexBuffers(*secondaryCmdBuffer, 0u, 1u, &vertexBuffer, &vertexBufferOffset);
 		draw(*secondaryCmdBuffer);
 		vk.cmdEndQuery(*secondaryCmdBuffer, *queryPool, 0u);
-	vk.endCommandBuffer(*secondaryCmdBuffer);
+	endCommandBuffer(vk, *secondaryCmdBuffer);
 
 	beginCommandBuffer(vk, *primaryCmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdBindVertexBuffers(*primaryCmdBuffer, 0u, 1u, &vertexBuffer, &vertexBufferOffset);
 		vk.cmdBindPipeline(*primaryCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *m_pipeline);
 		vk.cmdResetQueryPool(*primaryCmdBuffer, *queryPool, 0u, 1u);
 
-		vk.cmdBeginRenderPass(*primaryCmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+		beginRenderPass(vk, *primaryCmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0], VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 		vk.cmdExecuteCommands(*primaryCmdBuffer, 1u, &secondaryCmdBuffer.get());
-		vk.cmdEndRenderPass(*primaryCmdBuffer);
+		endRenderPass(vk, *primaryCmdBuffer);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*primaryCmdBuffer);
+	endCommandBuffer(vk, *primaryCmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *primaryCmdBuffer);
@@ -1955,31 +1860,32 @@ tcu::TestStatus	TessellationShaderSecondrayInheritedTestInstance::executeTest (v
 		vk.cmdBindPipeline(*secondaryCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *m_pipeline);
 		vk.cmdBindVertexBuffers(*secondaryCmdBuffer, 0u, 1u, &vertexBuffer, &vertexBufferOffset);
 		draw(*secondaryCmdBuffer);
-	vk.endCommandBuffer(*secondaryCmdBuffer);
+	endCommandBuffer(vk, *secondaryCmdBuffer);
 
 	beginCommandBuffer(vk, *primaryCmdBuffer);
 	{
-		const VkRect2D				renderArea				= { { 0, 0 }, { WIDTH, HEIGHT } };
 		std::vector<VkClearValue>	renderPassClearValues	(2);
 		deMemset(&renderPassClearValues[0], 0, static_cast<int>(renderPassClearValues.size()) * sizeof(VkClearValue));
-		const RenderPassBeginInfo	renderPassBegin			(*m_renderPass, *m_framebuffer, renderArea, renderPassClearValues);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-		transition2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+		initialTransitionColor2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		initialTransitionDepth2DImage(vk, *primaryCmdBuffer, m_depthImage->object(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+									  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 
 		vk.cmdBindVertexBuffers(*primaryCmdBuffer, 0u, 1u, &vertexBuffer, &vertexBufferOffset);
 		vk.cmdBindPipeline(*primaryCmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *m_pipeline);
 		vk.cmdResetQueryPool(*primaryCmdBuffer, *queryPool, 0u, 1u);
 		vk.cmdBeginQuery(*primaryCmdBuffer, *queryPool, 0u, (VkQueryControlFlags)0u);
 
-		vk.cmdBeginRenderPass(*primaryCmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+		beginRenderPass(vk, *primaryCmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, WIDTH, HEIGHT), (deUint32)renderPassClearValues.size(), &renderPassClearValues[0], VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 		vk.cmdExecuteCommands(*primaryCmdBuffer, 1u, &secondaryCmdBuffer.get());
-		vk.cmdEndRenderPass(*primaryCmdBuffer);
+		endRenderPass(vk, *primaryCmdBuffer);
 		vk.cmdEndQuery(*primaryCmdBuffer, *queryPool, 0u);
 
-		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		transition2DImage(vk, *primaryCmdBuffer, m_colorAttachmentImage->object(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+						  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
-	vk.endCommandBuffer(*primaryCmdBuffer);
+	endCommandBuffer(vk, *primaryCmdBuffer);
 
 	// Wait for completion
 	submitCommandsAndWait(vk, device, queue, *primaryCmdBuffer);

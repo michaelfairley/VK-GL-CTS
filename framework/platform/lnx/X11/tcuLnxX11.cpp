@@ -55,6 +55,13 @@ WindowBase::~WindowBase (void)
 XlibDisplay::XlibDisplay (EventState& eventState, const char* name)
 	: DisplayBase	(eventState)
 {
+	// From man:XinitThreads(3):
+	//
+	//     The XInitThreads function initializes Xlib support for concurrent
+	//     threads.  This function must be the first Xlib function
+	//     a multi-threaded program calls, and it must complete before any other
+	//     Xlib call is made.
+	DE_CHECK_RUNTIME_ERR(XInitThreads() != 0);
 	m_display = XOpenDisplay((char*)name); // Won't modify argument string.
 	if (!m_display)
 		throw ResourceError("Failed to open display", name, __FILE__, __LINE__);
@@ -140,6 +147,8 @@ XlibWindow::XlibWindow (XlibDisplay& display, int width, int height, ::Visual* v
 	// other issues, so this is disabled by default.
 	const bool				overrideRedirect	= false;
 
+	int depth = CopyFromParent;
+
 	if (overrideRedirect)
 	{
 		mask |= CWOverrideRedirect;
@@ -159,6 +168,8 @@ XlibWindow::XlibWindow (XlibDisplay& display, int width, int height, ::Visual* v
 		m_colormap			= XCreateColormap(dpy, root, visual, AllocNone);
 		swa.colormap		= m_colormap;
 		mask |= CWColormap;
+
+		depth = info.depth;
 	}
 
 	swa.border_pixel	= 0;
@@ -170,8 +181,17 @@ XlibWindow::XlibWindow (XlibDisplay& display, int width, int height, ::Visual* v
 		height = DEFAULT_WINDOW_HEIGHT;
 
 	m_window = XCreateWindow(dpy, root, 0, 0, width, height, 0,
-							 CopyFromParent, InputOutput, visual, mask, &swa);
+							 depth, InputOutput, visual, mask, &swa);
 	TCU_CHECK(m_window);
+
+	/* Prevent the window from stealing input, since our windows are
+	 * non-interactive.
+	 */
+	XWMHints *hints = XAllocWMHints();
+	hints->flags |= InputHint;
+	hints->input = False;
+	XSetWMHints(dpy, m_window, hints);
+	XFree(hints);
 
 	Atom deleteAtom = m_display.getDeleteAtom();
 	XSetWMProtocols(dpy, m_window, &deleteAtom, 1);

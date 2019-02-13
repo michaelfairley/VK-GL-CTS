@@ -33,6 +33,9 @@
 #include "vktDrawShaderDrawParametersTests.hpp"
 #include "vktDrawNegativeViewportHeightTests.hpp"
 #include "vktDrawInvertedDepthRangesTests.hpp"
+#include "vktDrawDifferingInterpolationTests.hpp"
+#include "vktDrawShaderLayerTests.hpp"
+#include "vktDrawShaderViewportIndexTests.hpp"
 
 namespace vkt
 {
@@ -53,14 +56,18 @@ void createChildren (tcu::TestCaseGroup* group)
 	group->addChild(new InstancedTests					(testCtx));
 	group->addChild(new ShaderDrawParametersTests		(testCtx));
 	group->addChild(createNegativeViewportHeightTests	(testCtx));
+	group->addChild(createZeroViewportHeightTests		(testCtx));
 	group->addChild(createInvertedDepthRangesTests		(testCtx));
+	group->addChild(createDifferingInterpolationTests	(testCtx));
+	group->addChild(createShaderLayerTests				(testCtx));
+	group->addChild(createShaderViewportIndexTests		(testCtx));
 }
 
 } // anonymous
 
 tcu::TestCaseGroup* createTests (tcu::TestContext& testCtx)
 {
-	return createTestGroup(testCtx, "draw", "Spimple Draw tests", createChildren);
+	return createTestGroup(testCtx, "draw", "Simple Draw tests", createChildren);
 }
 
 } // Draw

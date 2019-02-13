@@ -23,6 +23,7 @@
 
 #include "vktSparseResourcesTestsUtil.hpp"
 #include "vkQueryUtil.hpp"
+#include "vkDeviceUtil.hpp"
 #include "vkTypeUtil.hpp"
 #include "tcuTextureUtil.hpp"
 
@@ -375,100 +376,18 @@ Move<VkFramebuffer> makeFramebuffer (const DeviceInterface&		vk,
 {
 	const VkFramebufferCreateInfo framebufferInfo =
 	{
-		VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,		// VkStructureType                             sType;
-		DE_NULL,										// const void*                                 pNext;
-		(VkFramebufferCreateFlags)0,					// VkFramebufferCreateFlags                    flags;
-		renderPass,										// VkRenderPass                                renderPass;
-		attachmentCount,								// uint32_t                                    attachmentCount;
-		pAttachments,									// const VkImageView*                          pAttachments;
-		width,											// uint32_t                                    width;
-		height,											// uint32_t                                    height;
-		layers,											// uint32_t                                    layers;
+		VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,		// VkStructureType				 sType;
+		DE_NULL,										// const void*					 pNext;
+		(VkFramebufferCreateFlags)0,					// VkFramebufferCreateFlags		flags;
+		renderPass,										// VkRenderPass					renderPass;
+		attachmentCount,								// uint32_t						attachmentCount;
+		pAttachments,									// const VkImageView*			  pAttachments;
+		width,											// uint32_t						width;
+		height,											// uint32_t						height;
+		layers,											// uint32_t						layers;
 	};
 
 	return createFramebuffer(vk, device, &framebufferInfo);
-}
-
-VkBufferMemoryBarrier makeBufferMemoryBarrier (const VkAccessFlags	srcAccessMask,
-											   const VkAccessFlags	dstAccessMask,
-											   const VkBuffer		buffer,
-											   const VkDeviceSize	offset,
-											   const VkDeviceSize	bufferSizeBytes)
-{
-	const VkBufferMemoryBarrier barrier =
-	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,	// VkStructureType	sType;
-		DE_NULL,									// const void*		pNext;
-		srcAccessMask,								// VkAccessFlags	srcAccessMask;
-		dstAccessMask,								// VkAccessFlags	dstAccessMask;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			srcQueueFamilyIndex;
-		VK_QUEUE_FAMILY_IGNORED,					// deUint32			destQueueFamilyIndex;
-		buffer,										// VkBuffer			buffer;
-		offset,										// VkDeviceSize		offset;
-		bufferSizeBytes,							// VkDeviceSize		size;
-	};
-	return barrier;
-}
-
-VkImageMemoryBarrier makeImageMemoryBarrier	(const VkAccessFlags			srcAccessMask,
-											 const VkAccessFlags			dstAccessMask,
-											 const VkImageLayout			oldLayout,
-											 const VkImageLayout			newLayout,
-											 const VkImage					image,
-											 const VkImageSubresourceRange	subresourceRange)
-{
-	const VkImageMemoryBarrier barrier =
-	{
-		VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,	// VkStructureType			sType;
-		DE_NULL,								// const void*				pNext;
-		srcAccessMask,							// VkAccessFlags			outputMask;
-		dstAccessMask,							// VkAccessFlags			inputMask;
-		oldLayout,								// VkImageLayout			oldLayout;
-		newLayout,								// VkImageLayout			newLayout;
-		VK_QUEUE_FAMILY_IGNORED,				// deUint32					srcQueueFamilyIndex;
-		VK_QUEUE_FAMILY_IGNORED,				// deUint32					destQueueFamilyIndex;
-		image,									// VkImage					image;
-		subresourceRange,						// VkImageSubresourceRange	subresourceRange;
-	};
-	return barrier;
-}
-
-VkImageMemoryBarrier makeImageMemoryBarrier (const VkAccessFlags			srcAccessMask,
-											 const VkAccessFlags			dstAccessMask,
-											 const VkImageLayout			oldLayout,
-											 const VkImageLayout			newLayout,
-											 const deUint32					srcQueueFamilyIndex,
-											 const deUint32					destQueueFamilyIndex,
-											 const VkImage					image,
-											 const VkImageSubresourceRange	subresourceRange)
-{
-	const VkImageMemoryBarrier barrier =
-	{
-		VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,	// VkStructureType			sType;
-		DE_NULL,								// const void*				pNext;
-		srcAccessMask,							// VkAccessFlags			outputMask;
-		dstAccessMask,							// VkAccessFlags			inputMask;
-		oldLayout,								// VkImageLayout			oldLayout;
-		newLayout,								// VkImageLayout			newLayout;
-		srcQueueFamilyIndex,					// deUint32					srcQueueFamilyIndex;
-		destQueueFamilyIndex,					// deUint32					destQueueFamilyIndex;
-		image,									// VkImage					image;
-		subresourceRange,						// VkImageSubresourceRange	subresourceRange;
-	};
-	return barrier;
-}
-
-VkMemoryBarrier makeMemoryBarrier (const VkAccessFlags	srcAccessMask,
-									   const VkAccessFlags	dstAccessMask)
-{
-	const VkMemoryBarrier barrier =
-	{
-		VK_STRUCTURE_TYPE_MEMORY_BARRIER,	// VkStructureType			sType;
-		DE_NULL,							// const void*				pNext;
-		srcAccessMask,						// VkAccessFlags			outputMask;
-		dstAccessMask,						// VkAccessFlags			inputMask;
-	};
-	return barrier;
 }
 
 de::MovePtr<Allocation> bindImage (const DeviceInterface& vk, const VkDevice device, Allocator& allocator, const VkImage image, const MemoryRequirement requirement)
@@ -483,23 +402,6 @@ de::MovePtr<Allocation> bindBuffer (const DeviceInterface& vk, const VkDevice de
 	de::MovePtr<Allocation> alloc(allocator.allocate(getBufferMemoryRequirements(vk, device, buffer), requirement));
 	VK_CHECK(vk.bindBufferMemory(device, buffer, alloc->getMemory(), alloc->getOffset()));
 	return alloc;
-}
-
-void beginCommandBuffer (const DeviceInterface& vk, const VkCommandBuffer commandBuffer)
-{
-	const VkCommandBufferBeginInfo commandBufBeginParams =
-	{
-		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,	// VkStructureType					sType;
-		DE_NULL,										// const void*						pNext;
-		0u,												// VkCommandBufferUsageFlags		flags;
-		(const VkCommandBufferInheritanceInfo*)DE_NULL,
-	};
-	VK_CHECK(vk.beginCommandBuffer(commandBuffer, &commandBufBeginParams));
-}
-
-void endCommandBuffer (const DeviceInterface& vk, const VkCommandBuffer commandBuffer)
-{
-	VK_CHECK(vk.endCommandBuffer(commandBuffer));
 }
 
 void submitCommands (const DeviceInterface&			vk,
@@ -535,27 +437,42 @@ void submitCommandsAndWait (const DeviceInterface&		vk,
 							const VkSemaphore*			pWaitSemaphores,
 							const VkPipelineStageFlags*	pWaitDstStageMask,
 							const deUint32				signalSemaphoreCount,
-							const VkSemaphore*			pSignalSemaphores)
+							const VkSemaphore*			pSignalSemaphores,
+							const bool					useDeviceGroups,
+							const deUint32				physicalDeviceID)
 {
-	const VkFenceCreateInfo	fenceParams =
+	const VkFenceCreateInfo	fenceParams				=
 	{
-		VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,	// VkStructureType		sType;
-		DE_NULL,								// const void*			pNext;
-		0u,										// VkFenceCreateFlags	flags;
+		VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,				// VkStructureType		sType;
+		DE_NULL,											// const void*			pNext;
+		0u,													// VkFenceCreateFlags	flags;
 	};
-	const Unique<VkFence> fence(createFence(vk, device, &fenceParams));
+	const Unique<VkFence>	fence(createFence		(vk, device, &fenceParams));
 
-	const VkSubmitInfo submitInfo =
+	const deUint32			deviceMask				= 1 << physicalDeviceID;
+	std::vector<deUint32>	deviceIndices			(waitSemaphoreCount, physicalDeviceID);
+	VkDeviceGroupSubmitInfo deviceGroupSubmitInfo	=
 	{
-		VK_STRUCTURE_TYPE_SUBMIT_INFO,		// VkStructureType				sType;
-		DE_NULL,							// const void*					pNext;
-		waitSemaphoreCount,					// deUint32						waitSemaphoreCount;
-		pWaitSemaphores,					// const VkSemaphore*			pWaitSemaphores;
-		pWaitDstStageMask,					// const VkPipelineStageFlags*	pWaitDstStageMask;
-		1u,									// deUint32						commandBufferCount;
-		&commandBuffer,						// const VkCommandBuffer*		pCommandBuffers;
-		signalSemaphoreCount,				// deUint32						signalSemaphoreCount;
-		pSignalSemaphores,					// const VkSemaphore*			pSignalSemaphores;
+		VK_STRUCTURE_TYPE_DEVICE_GROUP_SUBMIT_INFO_KHR,		//VkStructureType		sType
+		DE_NULL,											// const void*			pNext
+		waitSemaphoreCount,									// uint32_t				waitSemaphoreCount
+		deviceIndices.size() ? &deviceIndices[0] : DE_NULL,	// const uint32_t*		pWaitSemaphoreDeviceIndices
+		1u,													// uint32_t				commandBufferCount
+		&deviceMask,										// const uint32_t*		pCommandBufferDeviceMasks
+		0u,													// uint32_t				signalSemaphoreCount
+		DE_NULL,											// const uint32_t*		pSignalSemaphoreDeviceIndices
+	};
+	const VkSubmitInfo		submitInfo				=
+	{
+		VK_STRUCTURE_TYPE_SUBMIT_INFO,						// VkStructureType				sType;
+		useDeviceGroups ? &deviceGroupSubmitInfo : DE_NULL,	// const void*					pNext;
+		waitSemaphoreCount,									// deUint32						waitSemaphoreCount;
+		pWaitSemaphores,									// const VkSemaphore*			pWaitSemaphores;
+		pWaitDstStageMask,									// const VkPipelineStageFlags*	pWaitDstStageMask;
+		1u,													// deUint32						commandBufferCount;
+		&commandBuffer,										// const VkCommandBuffer*		pCommandBuffers;
+		signalSemaphoreCount,								// deUint32						signalSemaphoreCount;
+		pSignalSemaphores,									// const VkSemaphore*			pSignalSemaphores;
 	};
 
 	VK_CHECK(vk.queueSubmit(queue, 1u, &submitInfo, *fence));
@@ -736,17 +653,6 @@ std::string getShaderImageCoordinates	(const ImageType	imageType,
 	}
 }
 
-VkExtent3D mipLevelExtents (const VkExtent3D& baseExtents, const deUint32 mipLevel)
-{
-	VkExtent3D result;
-
-	result.width	= std::max(baseExtents.width  >> mipLevel, 1u);
-	result.height	= std::max(baseExtents.height >> mipLevel, 1u);
-	result.depth	= std::max(baseExtents.depth  >> mipLevel, 1u);
-
-	return result;
-}
-
 deUint32 getImageMaxMipLevels (const VkImageFormatProperties& imageFormatProperties, const VkExtent3D& extent)
 {
 	const deUint32 widestEdge = std::max(std::max(extent.width, extent.height), extent.depth);
@@ -870,6 +776,15 @@ deUint32 findMatchingMemoryType (const InstanceInterface&		instance,
 	}
 
 	return NO_MATCH_FOUND;
+}
+
+deUint32 getHeapIndexForMemoryType (const InstanceInterface&	instance,
+									const VkPhysicalDevice		physicalDevice,
+									const deUint32				memoryType)
+{
+	const VkPhysicalDeviceMemoryProperties deviceMemoryProperties = getPhysicalDeviceMemoryProperties(instance, physicalDevice);
+	DE_ASSERT(memoryType < deviceMemoryProperties.memoryTypeCount);
+	return deviceMemoryProperties.memoryTypes[memoryType].heapIndex;
 }
 
 bool checkSparseSupportForImageType (const InstanceInterface&	instance,

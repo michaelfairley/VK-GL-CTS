@@ -49,14 +49,15 @@ static const struct
 	const char*		name;
 	EGLenum			api;
 	EGLint			apiBit;
+	bool			noConfigOptional;
 	const EGLint*	ctxAttrs;
 } s_apis[] =
 {
-	{ "OpenGL",			EGL_OPENGL_API,		EGL_OPENGL_BIT,			DE_NULL		},
-	{ "OpenGL ES 1",	EGL_OPENGL_ES_API,	EGL_OPENGL_ES_BIT,		s_es1Attrs	},
-	{ "OpenGL ES 2",	EGL_OPENGL_ES_API,	EGL_OPENGL_ES2_BIT,		s_es2Attrs	},
-	{ "OpenGL ES 3",	EGL_OPENGL_ES_API,	EGL_OPENGL_ES3_BIT_KHR,	s_es3Attrs	},
-	{ "OpenVG",			EGL_OPENVG_API,		EGL_OPENVG_BIT,			DE_NULL		}
+	{ "OpenGL",			EGL_OPENGL_API,		EGL_OPENGL_BIT,			false,	DE_NULL		},
+	{ "OpenGL ES 1",	EGL_OPENGL_ES_API,	EGL_OPENGL_ES_BIT,		true,	s_es1Attrs	},
+	{ "OpenGL ES 2",	EGL_OPENGL_ES_API,	EGL_OPENGL_ES2_BIT,		true,	s_es2Attrs	},
+	{ "OpenGL ES 3",	EGL_OPENGL_ES_API,	EGL_OPENGL_ES3_BIT_KHR,	false,	s_es3Attrs	},
+	{ "OpenVG",			EGL_OPENVG_API,		EGL_OPENVG_BIT,			false,	DE_NULL		}
 };
 
 class CreateContextCase : public SimpleConfigCase
@@ -146,7 +147,11 @@ public:
 			const EGLContext	context = egl.createContext(*display, (EGLConfig)0, EGL_NO_CONTEXT, s_apis[apiNdx].ctxAttrs);
 			const EGLenum		err		= egl.getError();
 
-			if (context == EGL_NO_CONTEXT || err != EGL_SUCCESS)
+			if (context == EGL_NO_CONTEXT && err == EGL_BAD_MATCH && s_apis[apiNdx].noConfigOptional)
+			{
+				log << TestLog::Message << "  Unsupported" << TestLog::EndMessage;
+			}
+			else if (context == EGL_NO_CONTEXT || err != EGL_SUCCESS)
 			{
 				log << TestLog::Message << "  Fail, context: " << tcu::toHex(context) << ", error: " << eglu::getErrorName(err) << TestLog::EndMessage;
 				m_testCtx.setTestResult(QP_TEST_RESULT_FAIL, "Failed to create context");

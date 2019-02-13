@@ -99,17 +99,12 @@ void fillRandomScalars (de::Random& rnd, T minValue, T maxValue, void* dst, int 
 //
 // This method finds the correct offset from the base of a vector<float32> given the indexes into the structure.
 // Returns the index in the inclusive range of 0 and 63. Each unit of the offset represents offset by the size of a 32-bit float.
-deUint32 getBaseOffset(	deUint32 indexOuterStruct,
-						deUint32 indexMatrixRow,
+deUint32 getBaseOffset (deUint32 indexMatrixRow,
 						deUint32 indexMatrixCol,
 						deUint32 indexInnerStruct,
 						deUint32 indexVec4Array,
 						deUint32 indexVec4)
 {
-	// index into the outer structure must be zero since the outer structure has only 1 member.
-	if(indexOuterStruct != 0)
-		DE_ASSERT(indexOuterStruct == 0);
-
 	DE_ASSERT(indexMatrixRow < 2);
 	DE_ASSERT(indexMatrixCol < 2);
 	DE_ASSERT(indexInnerStruct < 2);
@@ -154,7 +149,7 @@ deUint32 getBaseOffset(	deUint32 indexOuterStruct,
 //
 // This method finds the correct offset from the base of a vector<float32> given the indexes into the structure.
 // Returns the index in the inclusive range of 0 and 127.
-deUint32 getBaseOffsetForSingleInputBuffer(	deUint32 indexOuterStruct,
+deUint32 getBaseOffsetForSingleInputBuffer (deUint32 indexOuterStruct,
 											deUint32 indexMatrixRow,
 											deUint32 indexMatrixCol,
 											deUint32 indexInnerStruct,
@@ -168,8 +163,8 @@ deUint32 getBaseOffsetForSingleInputBuffer(	deUint32 indexOuterStruct,
 	DE_ASSERT(indexVec4Array < 2);
 	DE_ASSERT(indexVec4 < 4);
 
-	// Get the offset assuming you have only one outer_struct. (use index 0 for outer_struct)
-	deUint32 offset = getBaseOffset(0, indexMatrixRow, indexMatrixCol, indexInnerStruct, indexVec4Array, indexVec4);
+	// Get the offset assuming you have only one outer_struct.
+	deUint32 offset = getBaseOffset(indexMatrixRow, indexMatrixCol, indexInnerStruct, indexVec4Array, indexVec4);
 
 	// If the second outer structure (b) is chosen in the input_buffer, we need to add an offset of 64 since
 	// each outer_struct contains 64 floats.
@@ -333,16 +328,13 @@ void addVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 			specs["ExtraSetupComputations"]	= "";
 			specs["VarPtrName"]				= "%mux_output_var_ptr";
 			specs["ResultStrategy"]			= "%mux_output_var_ptr	= OpSelect %sb_f32ptr %is_neg" + muxInput1 + muxInput2 + "\n";
-			spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			spec.assembly					= shaderTemplate.specialize(specs);
 			spec.numWorkGroups				= IVec3(numMuxes, 1, 1);
 			spec.requestedVulkanFeatures	= requiredFeatures;
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputAFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputBFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputSFloats)));
-			spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 			spec.extensions.push_back("VK_KHR_variable_pointers");
 			group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 		}
@@ -357,16 +349,13 @@ void addVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 			specs["ExtraSetupComputations"]	= "";
 			specs["VarPtrName"]				= "%mux_output_var_ptr";
 			specs["ResultStrategy"]			= "%mux_output_var_ptr = OpFunctionCall %sb_f32ptr %choose_input_func %is_neg" + muxInput1 + muxInput2 + "\n";
-			spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			spec.assembly					= shaderTemplate.specialize(specs);
 			spec.numWorkGroups				= IVec3(numMuxes, 1, 1);
 			spec.requestedVulkanFeatures	= requiredFeatures;
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputAFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputBFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputSFloats)));
-			spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 			spec.extensions.push_back("VK_KHR_variable_pointers");
 			group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 		}
@@ -389,16 +378,13 @@ void addVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 				"						      OpBranch %end_label\n"
 				"%end_label					= OpLabel\n"
 				"%mux_output_var_ptr		= OpPhi %sb_f32ptr" + muxInput1 + "%take_mux_input_1" + muxInput2 + "%take_mux_input_2\n";
-			spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			spec.assembly					= shaderTemplate.specialize(specs);
 			spec.numWorkGroups				= IVec3(numMuxes, 1, 1);
 			spec.requestedVulkanFeatures	= requiredFeatures;
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputAFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputBFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputSFloats)));
-			spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 			spec.extensions.push_back("VK_KHR_variable_pointers");
 			group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 		}
@@ -416,16 +402,13 @@ void addVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 				"%mux_input_1_copy			= OpCopyObject %sb_f32ptr" + muxInput1 + "\n"
 				"%mux_input_2_copy			= OpCopyObject %sb_f32ptr" + muxInput2 + "\n"
 				"%mux_output_var_ptr		= OpSelect %sb_f32ptr %is_neg %mux_input_1_copy %mux_input_2_copy\n";
-			spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			spec.assembly					= shaderTemplate.specialize(specs);
 			spec.numWorkGroups				= IVec3(numMuxes, 1, 1);
 			spec.requestedVulkanFeatures	= requiredFeatures;
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputAFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputBFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputSFloats)));
-			spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 			spec.extensions.push_back("VK_KHR_variable_pointers");
 			group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 		}
@@ -449,16 +432,13 @@ void addVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 					"%opselect_result			= OpSelect %sb_f32ptr %is_neg" + muxInput1 + muxInput2 + "\n"
 					"							  OpStore %mux_output_copy %opselect_result\n"
 					"%mux_output_var_ptr		= OpLoad %sb_f32ptr %mux_output_copy\n";
-				spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 				spec.assembly					= shaderTemplate.specialize(specs);
 				spec.numWorkGroups				= IVec3(numMuxes, 1, 1);
 				spec.requestedVulkanFeatures	= requiredFeatures;
-				spec.inputs.push_back(BufferSp(new Float32Buffer(inputAFloats)));
-				spec.inputs.push_back(BufferSp(new Float32Buffer(inputBFloats)));
-				spec.inputs.push_back(BufferSp(new Float32Buffer(inputSFloats)));
-				spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+				spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 				spec.extensions.push_back("VK_KHR_variable_pointers");
 				group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), description.c_str(), spec));
 			}
@@ -486,16 +466,13 @@ void addVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 					"%a_2i_ptr              = OpPtrAccessChain %sb_f32ptr %a_ptr %two_i\n"
 					"%a_2i_plus_1_ptr       = OpPtrAccessChain %sb_f32ptr %a_ptr %two_i_plus_1\n"
 					"%mux_output_var_ptr    = OpSelect %sb_f32ptr %is_neg " + in_1 + in_2 + "\n";
-			spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			spec.assembly					= shaderTemplate.specialize(specs);
 			spec.numWorkGroups				= IVec3(numMuxes, 1, 1);
 			spec.requestedVulkanFeatures	= requiredFeatures;
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputAFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputBFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputSFloats)));
-			spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 			spec.extensions.push_back("VK_KHR_variable_pointers");
 			group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 		}
@@ -513,16 +490,13 @@ void addVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 											  "               %val = OpLoad %f32 %mux_output_var_ptr\n"
 											  "        %val_plus_1 = OpFAdd %f32 %val %fone\n"
 											  "						 OpStore %mux_output_var_ptr %val_plus_1\n";
-			spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			spec.assembly					= shaderTemplate.specialize(specs);
 			spec.numWorkGroups				= IVec3(numMuxes, 1, 1);
 			spec.requestedVulkanFeatures	= requiredFeatures;
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputAFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputBFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputSFloats)));
-			spec.outputs.push_back(BufferSp(new Float32Buffer(expectedIncrOutput)));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedIncrOutput))));
 			spec.extensions.push_back("VK_KHR_variable_pointers");
 			group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 		}
@@ -557,16 +531,13 @@ void addVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 					"						  OpStore %loc_AW_i %inval_a_i\n"
 					"						  OpStore %loc_BW_i %inval_b_i\n"
 					"%output_var_ptr		= OpSelect %f32_wrkgrp_ptr %is_neg %loc_AW_i %loc_BW_i\n";
-			spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			spec.assembly					= shaderTemplate.specialize(specs);
 			spec.numWorkGroups				= IVec3(numMuxes, 1, 1);
 			spec.requestedVulkanFeatures	= requiredFeatures;
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputAFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputBFloats)));
-			spec.inputs.push_back(BufferSp(new Float32Buffer(inputSFloats)));
-			spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+			spec.inputs.push_back (Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back (Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.inputs.push_back (Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 			spec.extensions.push_back("VK_KHR_variable_pointers");
 			group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 		}
@@ -647,21 +618,13 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 	// 7. inputC.a.r[?][?].(x|y)[?][?]	or	inputC.b.r[?][?].(x|y)[?][?]	= scalars
 	const int numLevels = 7;
 
-	const string decorations (
+	const string commonDecorations (
 		// Decorations
 		"OpDecorate %id BuiltIn GlobalInvocationId		\n"
-		"OpDecorate %inputA DescriptorSet 0				\n"
-		"OpDecorate %inputB DescriptorSet 0				\n"
-		"OpDecorate %inputC DescriptorSet 0				\n"
 		"OpDecorate %outdata DescriptorSet 0			\n"
-		"OpDecorate %inputA Binding 0					\n"
-		"OpDecorate %inputB Binding 1					\n"
-		"OpDecorate %inputC Binding 2					\n"
 		"OpDecorate %outdata Binding 3					\n"
 
 		// Set the Block decoration
-		"OpDecorate %outer_struct	Block				\n"
-		"OpDecorate %input_buffer	Block				\n"
 		"OpDecorate %output_buffer	Block				\n"
 
 		// Set the Offsets
@@ -678,6 +641,24 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 		"OpDecorate %mat2x2_inner_struct ArrayStride 128	\n"
 		"OpDecorate %outer_struct_ptr    ArrayStride 256	\n"
 		"OpDecorate %v4f32_ptr           ArrayStride 16		\n"
+	);
+
+	const string inputABDecorations (
+		"OpDecorate %inputA DescriptorSet 0				\n"
+		"OpDecorate %inputB DescriptorSet 0				\n"
+		"OpDecorate %inputA Binding 0					\n"
+		"OpDecorate %inputB Binding 1					\n"
+
+		// inputA and inputB have type outer_struct so it needs Block
+		"OpDecorate %outer_struct	Block				\n"
+	);
+
+	const string inputCDecorations (
+		"OpDecorate %inputC DescriptorSet 0				\n"
+		"OpDecorate %inputC Binding 2					\n"
+
+		// inputC has type input_buffer so it needs Block
+		"OpDecorate %input_buffer	Block				\n"
 	);
 
 	const string types (
@@ -739,10 +720,22 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 		// VARIABLES //
 		///////////////
 		"%id					= OpVariable %uvec3ptr			Input				\n"
+		"%outdata				= OpVariable %output_buffer_ptr	StorageBuffer		\n"
+	);
+
+	const string inputABVariables (
 		"%inputA				= OpVariable %outer_struct_ptr	StorageBuffer		\n"
 		"%inputB				= OpVariable %outer_struct_ptr	StorageBuffer		\n"
+	);
+
+	const string inputCVariables (
 		"%inputC				= OpVariable %input_buffer_ptr	StorageBuffer		\n"
-		"%outdata				= OpVariable %output_buffer_ptr	StorageBuffer		\n"
+	);
+
+	const string inputCIntermediates (
+		// Here are the 2 nested structures within InputC.
+		"%inputC_a				= OpAccessChain %outer_struct_ptr %inputC %c_i32_0\n"
+		"%inputC_b				= OpAccessChain %outer_struct_ptr %inputC %c_i32_1\n"
 	);
 
 	const StringTemplate shaderTemplate (
@@ -760,11 +753,15 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 		"OpName %main           \"main\"\n"
 		"OpName %id             \"gl_GlobalInvocationID\"\n"
 
-		+ decorations
+		+ commonDecorations +
+
+		"${input_decorations}\n"
 
 		+ string(getComputeAsmCommonTypes())
 
 		+ types +
+
+		"${input_variables}\n"
 
 		// These selector functions return variable pointers.
 		// These functions are used by tests that use OpFunctionCall to obtain the variable pointer
@@ -782,9 +779,7 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 		"%main					= OpFunction %void None %voidf\n"
 		"%label					= OpLabel\n"
 
-		// Here are the 2 nested structures within InputC.
-		"%inputC_a				= OpAccessChain %outer_struct_ptr %inputC %c_i32_0\n"
-		"%inputC_b				= OpAccessChain %outer_struct_ptr %inputC %c_i32_1\n"
+		"${input_intermediates}\n"
 
 		// Define the 2 pointers from which we're going to choose one.
 		"${a_loc} \n"
@@ -816,6 +811,9 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 		for (int selectInputA = 0; selectInputA < 2; ++selectInputA)
 		{
 			const string extraCap					= isSingleInputBuffer	? "OpCapability VariablePointersStorageBuffer\n" : "OpCapability VariablePointers\n";
+			const string inputDecorations			= isSingleInputBuffer	? inputCDecorations								 : inputABDecorations;
+			const string inputVariables				= isSingleInputBuffer	? inputCVariables								 : inputABVariables;
+			const string inputIntermediates			= isSingleInputBuffer	? inputCIntermediates							 : "";
 			const vector<float>& selectedInput		= isSingleInputBuffer	? inputC										 : (selectInputA ? inputA : inputB);
 			const string bufferType					= isSingleInputBuffer	? "single_buffer_"								 : "two_buffers_";
 			const string baseA						= isSingleInputBuffer	? "%inputC_a"									 : "%inputA";
@@ -912,6 +910,9 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 					string opCodeForTests			= "opselect";
 					string name						= opCodeForTests + indexLevelNames[indexLevel] + bufferType + selectedInputStr;
 					specs["extra_capability"]		= extraCap;
+					specs["input_decorations"]		= inputDecorations;
+					specs["input_variables"]		= inputVariables;
+					specs["input_intermediates"]	= inputIntermediates;
 					specs["selected_type"]			= pointerTypeAtLevel[indexLevel];
 					specs["select_inputA"]			= spirvSelectInputA;
 					specs["a_loc"]					= inputALocations[indexLevel];
@@ -923,16 +924,13 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 														+ baseANameAtLevel[indexLevel] + " "
 														+ baseBNameAtLevel[indexLevel] + "\n";
 					expectedOutput[0]				= selectedInput[baseOffset];
-					spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 					spec.assembly					= shaderTemplate.specialize(specs);
 					spec.numWorkGroups				= IVec3(1, 1, 1);
 					spec.requestedVulkanFeatures	= requiredFeatures;
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputA)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputB)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputC)));
-					spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputC)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 					spec.extensions.push_back("VK_KHR_variable_pointers");
 					group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 				}
@@ -944,6 +942,9 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 					string opCodeForTests			= "opfunctioncall";
 					string name						= opCodeForTests + indexLevelNames[indexLevel] + bufferType + selectedInputStr;
 					specs["extra_capability"]		= extraCap;
+					specs["input_decorations"]		= inputDecorations;
+					specs["input_variables"]		= inputVariables;
+					specs["input_intermediates"]	= inputIntermediates;
 					specs["selected_type"]			= pointerTypeAtLevel[indexLevel];
 					specs["select_inputA"]			= spirvSelectInputA;
 					specs["a_loc"]					= inputALocations[indexLevel];
@@ -956,16 +957,13 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 														+ baseANameAtLevel[indexLevel] + " "
 														+ baseBNameAtLevel[indexLevel] + "\n";
 					expectedOutput[0]				= selectedInput[baseOffset];
-					spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 					spec.assembly					= shaderTemplate.specialize(specs);
 					spec.numWorkGroups				= IVec3(1, 1, 1);
 					spec.requestedVulkanFeatures	= requiredFeatures;
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputA)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputB)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputC)));
-					spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputC)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 					spec.extensions.push_back("VK_KHR_variable_pointers");
 					group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 				}
@@ -978,6 +976,9 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 					string opCodeForTests			= "opphi";
 					string name						= opCodeForTests + indexLevelNames[indexLevel] + bufferType + selectedInputStr;
 					specs["extra_capability"]		= extraCap;
+					specs["input_decorations"]		= inputDecorations;
+					specs["input_variables"]		= inputVariables;
+					specs["input_intermediates"]	= inputIntermediates;
 					specs["selected_type"]			= pointerTypeAtLevel[indexLevel];
 					specs["select_inputA"]			= spirvSelectInputA;
 					specs["a_loc"]					= inputALocations[indexLevel];
@@ -998,16 +999,13 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 														+ baseBNameAtLevel[indexLevel]
 														+ " %take_input_b\n";
 					expectedOutput[0]				= selectedInput[baseOffset];
-					spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 					spec.assembly					= shaderTemplate.specialize(specs);
 					spec.numWorkGroups				= IVec3(1, 1, 1);
 					spec.requestedVulkanFeatures	= requiredFeatures;
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputA)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputB)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputC)));
-					spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputC)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 					spec.extensions.push_back("VK_KHR_variable_pointers");
 					group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 				}
@@ -1019,6 +1017,9 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 					string opCodeForTests			= "opcopyobject";
 					string name						= opCodeForTests + indexLevelNames[indexLevel] + bufferType + selectedInputStr;
 					specs["extra_capability"]		= extraCap;
+					specs["input_decorations"]		= inputDecorations;
+					specs["input_variables"]		= inputVariables;
+					specs["input_intermediates"]	= inputIntermediates;
 					specs["selected_type"]			= pointerTypeAtLevel[indexLevel];
 					specs["select_inputA"]			= spirvSelectInputA;
 					specs["a_loc"]					= inputALocations[indexLevel];
@@ -1029,16 +1030,13 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 										"%in_b_copy = OpCopyObject " + pointerTypeAtLevel[indexLevel] + " " + baseBNameAtLevel[indexLevel] + "\n"
 										"%var_ptr	= OpSelect " + pointerTypeAtLevel[indexLevel] + " " + spirvSelectInputA + " %in_a_copy %in_b_copy\n";
 					expectedOutput[0]				= selectedInput[baseOffset];
-					spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 					spec.assembly					= shaderTemplate.specialize(specs);
 					spec.numWorkGroups				= IVec3(1, 1, 1);
 					spec.requestedVulkanFeatures	= requiredFeatures;
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputA)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputB)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputC)));
-					spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputC)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 					spec.extensions.push_back("VK_KHR_variable_pointers");
 					group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 				}
@@ -1050,6 +1048,9 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 					string opCodeForTests			= "opptraccesschain";
 					string name						= opCodeForTests + indexLevelNames[indexLevel] + bufferType + selectedInputStr;
 					specs["extra_capability"]		= extraCap;
+					specs["input_decorations"]		= inputDecorations;
+					specs["input_variables"]		= inputVariables;
+					specs["input_intermediates"]	= inputIntermediates;
 					specs["selected_type"]			= pointerTypeAtLevel[indexLevel];
 					specs["select_inputA"]			= spirvSelectInputA;
 					specs["a_loc"]					= inputAPtrAccessChain[indexLevel];
@@ -1061,16 +1062,13 @@ void addComplexTypesVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 														+ baseANameAtLevel[indexLevel] + " "
 														+ baseBNameAtLevel[indexLevel] + "\n";
 					expectedOutput[0]				= selectedInput[baseOffset];
-					spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[1]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-					spec.inputTypes[2]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 					spec.assembly					= shaderTemplate.specialize(specs);
 					spec.numWorkGroups				= IVec3(1, 1, 1);
 					spec.requestedVulkanFeatures	= requiredFeatures;
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputA)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputB)));
-					spec.inputs.push_back(BufferSp(new Float32Buffer(inputC)));
-					spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputC)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+					spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 					spec.extensions.push_back("VK_KHR_variable_pointers");
 					group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 				}
@@ -1184,12 +1182,11 @@ void addNullptrVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 							"%loaded_f32     = OpLoad  %f32         %loaded_f32_ptr \n"
 							"                  OpStore %output_loc  %loaded_f32     \n";
 
-		spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		spec.assembly					= shaderTemplate.specialize(specs);
 		spec.numWorkGroups				= IVec3(1, 1, 1);
 		spec.requestedVulkanFeatures	= requiredFeatures;
-		spec.inputs.push_back(BufferSp(new Float32Buffer(input)));
-		spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+		spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(input)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+		spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 		spec.extensions.push_back("VK_KHR_variable_pointers");
 		group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 	}
@@ -1204,12 +1201,11 @@ void addNullptrVariablePointersComputeGroup (tcu::TestCaseGroup* group)
 							"%loaded_var = OpLoad %f32 %selected_ptr\n"
 							"OpStore %output_loc %loaded_var\n";
 
-		spec.inputTypes[0]				= VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		spec.assembly					= shaderTemplate.specialize(specs);
 		spec.numWorkGroups				= IVec3(1, 1, 1);
 		spec.requestedVulkanFeatures	= requiredFeatures;
-		spec.inputs.push_back(BufferSp(new Float32Buffer(input)));
-		spec.outputs.push_back(BufferSp(new Float32Buffer(expectedOutput)));
+		spec.inputs.push_back(Resource(BufferSp(new Float32Buffer(input)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+		spec.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput))));
 		spec.extensions.push_back("VK_KHR_variable_pointers");
 		group->addChild(new SpvAsmComputeShaderCase(testCtx, name.c_str(), name.c_str(), spec));
 	}
@@ -1307,7 +1303,7 @@ void addVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 		"OpDecorate %outdata  Binding 3\n");
 
 	const StringTemplate testFunction	(
-		"%test_code		= OpFunction %v4f32 None %v4f32_function\n"
+		"%test_code		= OpFunction %v4f32 None %v4f32_v4f32_function\n"
 		"%param			= OpFunctionParameter %v4f32\n"
 		"%entry			= OpLabel\n"
 
@@ -1402,10 +1398,10 @@ void addVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 			fragments["pre_main"]			= preMain.specialize(specs);
 			fragments["testfun"]			= testFunction.specialize(specs);
 
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputAFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputSFloats))));
-			resources.outputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(expectedOutput))));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 			createTestsForAllStages(name.c_str(), defaultColors, defaultColors, fragments, resources, extensions, testGroup, requiredFeatures);
 		}
 		{ // Variable Pointer Reads (using OpFunctionCall)
@@ -1424,10 +1420,10 @@ void addVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 			fragments["pre_main"]			= preMain.specialize(specs);
 			fragments["testfun"]			= testFunction.specialize(specs);
 
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputAFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputSFloats))));
-			resources.outputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(expectedOutput))));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 			createTestsForAllStages(name.c_str(), defaultColors, defaultColors, fragments, resources, extensions, testGroup, requiredFeatures);
 		}
 		{ // Variable Pointer Reads (using OpPhi)
@@ -1454,10 +1450,10 @@ void addVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 			fragments["pre_main"]			= preMain.specialize(specs);
 			fragments["testfun"]			= testFunction.specialize(specs);
 
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputAFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputSFloats))));
-			resources.outputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(expectedOutput))));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 			createTestsForAllStages(name.c_str(), defaultColors, defaultColors, fragments, resources, extensions, testGroup, requiredFeatures);
 		}
 		{ // Variable Pointer Reads (using OpCopyObject)
@@ -1479,10 +1475,10 @@ void addVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 			fragments["pre_main"]			= preMain.specialize(specs);
 			fragments["testfun"]			= testFunction.specialize(specs);
 
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputAFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputSFloats))));
-			resources.outputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(expectedOutput))));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 			createTestsForAllStages(name.c_str(), defaultColors, defaultColors, fragments, resources, extensions, testGroup, requiredFeatures);
 		}
 		{ // Test storing into Private variables.
@@ -1509,10 +1505,10 @@ void addVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
 
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputAFloats))));
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBFloats))));
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputSFloats))));
-				resources.outputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(expectedOutput))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				resources.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				createTestsForAllStages(name.c_str(), defaultColors, defaultColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
 		}
@@ -1544,10 +1540,10 @@ void addVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 			fragments["testfun"]			= testFunction.specialize(specs);
 			fragments["capability"]			= cap;
 
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputAFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputSFloats))));
-			resources.outputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(expectedOutput))));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedOutput)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 			createTestsForAllStages(name.c_str(), defaultColors, defaultColors, fragments, resources, extensions, testGroup, requiredFeatures);
 		}
 		{   // Variable Pointer Writes
@@ -1569,10 +1565,10 @@ void addVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 			fragments["pre_main"]			= preMain.specialize(specs);
 			fragments["testfun"]			= testFunction.specialize(specs);
 
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputAFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBFloats))));
-			resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputSFloats))));
-			resources.outputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(expectedIncrOutput))));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputAFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputSFloats)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+			resources.outputs.push_back(Resource(BufferSp(new Float32Buffer(expectedIncrOutput)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 			createTestsForAllStages(name.c_str(), defaultColors, defaultColors, fragments, resources, extensions, testGroup, requiredFeatures);
 		}
 	}
@@ -1665,6 +1661,7 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 		"OpDecorate %arr2_v4float        ArrayStride 16			\n"
 		"OpDecorate %arr2_inner_struct   ArrayStride 64			\n"
 		"OpDecorate %mat2x2_inner_struct ArrayStride 128		\n"
+		"OpDecorate %mat2x2_ptr			 ArrayStride 128		\n"
 		"OpDecorate %sb_buf              ArrayStride 256		\n"
 		"OpDecorate %v4f32_ptr           ArrayStride 16			\n"
 
@@ -1674,6 +1671,8 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 		"OpDecorate %in_b			DescriptorSet 0				\n"
 		"OpDecorate %in_a			Binding 0					\n"
 		"OpDecorate %in_b			Binding 1					\n"
+		"OpDecorate %in_a			NonWritable					\n"
+		"OpDecorate %in_b			NonWritable					\n"
 	);
 
 	const StringTemplate preMain		(
@@ -1739,9 +1738,13 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 	);
 
 	const StringTemplate testFunction	(
-		"%test_code		= OpFunction %v4f32 None %v4f32_function\n"
+		"%test_code		= OpFunction %v4f32 None %v4f32_v4f32_function\n"
 		"%param			= OpFunctionParameter %v4f32\n"
 		"%entry			= OpLabel\n"
+
+		// Define base pointers for OpPtrAccessChain
+		"%in_a_matptr	= OpAccessChain %mat2x2_ptr %in_a %c_i32_0\n"
+		"%in_b_matptr	= OpAccessChain %mat2x2_ptr %in_b %c_i32_0\n"
 
 		// Define the 2 pointers from which we're going to choose one.
 		"${a_loc} \n"
@@ -1799,34 +1802,34 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 											"%b_loc = OpAccessChain %sb_f32ptr        %in_b %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_3"};
 
 		const string inputAPtrAccessChain[]	= {	"",
-											"%a_loc = OpPtrAccessChain %mat2x2_ptr       %in_a %c_i32_0 %c_i32_0",
-											"%a_loc = OpPtrAccessChain %arr2_ptr         %in_a %c_i32_0 %c_i32_0 %c_i32_0",
-											"%a_loc = OpPtrAccessChain %inner_struct_ptr %in_a %c_i32_0 %c_i32_0 %c_i32_1 %c_i32_1",
-											"%a_loc = OpPtrAccessChain %arr_v4f32_ptr    %in_a %c_i32_0 %c_i32_0 %c_i32_0 %c_i32_0 %c_i32_1",
-											"%a_loc = OpPtrAccessChain %v4f32_ptr        %in_a %c_i32_0 %c_i32_0 %c_i32_1 %c_i32_0 %c_i32_0 %c_i32_0",
+											"%a_loc = OpPtrAccessChain %mat2x2_ptr       %in_a_matptr %c_i32_0",
+											"%a_loc = OpPtrAccessChain %arr2_ptr         %in_a_matptr %c_i32_0 %c_i32_0",
+											"%a_loc = OpPtrAccessChain %inner_struct_ptr %in_a_matptr %c_i32_0 %c_i32_1 %c_i32_1",
+											"%a_loc = OpPtrAccessChain %arr_v4f32_ptr    %in_a_matptr %c_i32_0 %c_i32_0 %c_i32_0 %c_i32_1",
+											"%a_loc = OpPtrAccessChain %v4f32_ptr        %in_a_matptr %c_i32_0 %c_i32_1 %c_i32_0 %c_i32_0 %c_i32_0",
 											// Next case emulates:
-											// %a_loc = OpPtrAccessChain %sb_f32ptr      %in_a %c_i32_0 %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_3
+											// %a_loc = OpPtrAccessChain %sb_f32ptr      %in_a_matptr %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_3
 											// But rewrite it to exercise OpPtrAccessChain with a non-zero first index:
 											//    %a_loc_arr is a pointer to an array that we want to index with 1.
 											// But instead of just using OpAccessChain with first index 1, use OpAccessChain with index 0 to
 											// get a pointer to the first element, then send that into OpPtrAccessChain with index 1.
-											"%a_loc_arr = OpPtrAccessChain %arr_v4f32_ptr %in_a %c_i32_0 %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 "
+											"%a_loc_arr = OpPtrAccessChain %arr_v4f32_ptr %in_a_matptr %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 "
 											"%a_loc_first_elem = OpAccessChain %v4f32_ptr %a_loc_arr %c_i32_0 "
 											"%a_loc = OpPtrAccessChain %sb_f32ptr %a_loc_first_elem %c_i32_1 %c_i32_3"};
 
 		const string inputBPtrAccessChain[]	= {	"",
-											"%b_loc = OpPtrAccessChain %mat2x2_ptr       %in_b %c_i32_0 %c_i32_0",
-											"%b_loc = OpPtrAccessChain %arr2_ptr         %in_b %c_i32_0 %c_i32_0 %c_i32_0",
-											"%b_loc = OpPtrAccessChain %inner_struct_ptr %in_b %c_i32_0 %c_i32_0 %c_i32_1 %c_i32_1",
-											"%b_loc = OpPtrAccessChain %arr_v4f32_ptr    %in_b %c_i32_0 %c_i32_0 %c_i32_0 %c_i32_0 %c_i32_1",
-											"%b_loc = OpPtrAccessChain %v4f32_ptr        %in_b %c_i32_0 %c_i32_0 %c_i32_1 %c_i32_0 %c_i32_0 %c_i32_0",
+											"%b_loc = OpPtrAccessChain %mat2x2_ptr       %in_b_matptr %c_i32_0",
+											"%b_loc = OpPtrAccessChain %arr2_ptr         %in_b_matptr %c_i32_0 %c_i32_0",
+											"%b_loc = OpPtrAccessChain %inner_struct_ptr %in_b_matptr %c_i32_0 %c_i32_1 %c_i32_1",
+											"%b_loc = OpPtrAccessChain %arr_v4f32_ptr    %in_b_matptr %c_i32_0 %c_i32_0 %c_i32_0 %c_i32_1",
+											"%b_loc = OpPtrAccessChain %v4f32_ptr        %in_b_matptr %c_i32_0 %c_i32_1 %c_i32_0 %c_i32_0 %c_i32_0",
 											// Next case emulates:
-											// %b_loc = OpPtrAccessChain %sb_f32ptr      %in_b %c_i32_0 %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_3
+											// %b_loc = OpPtrAccessChain %sb_f32ptr      %in_b_matptr %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_1 %c_i32_3
 											// But rewrite it to exercise OpPtrAccessChain with a non-zero first index:
 											//    %b_loc_arr is a pointer to an array that we want to index with 1.
 											// But instead of just using OpAccessChain with first index 1, use OpAccessChain with index 0 to
 											// get a pointer to the first element, then send that into OpPtrAccessChain with index 1.
-											"%b_loc_arr = OpPtrAccessChain %arr_v4f32_ptr %in_b %c_i32_0 %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 "
+											"%b_loc_arr = OpPtrAccessChain %arr_v4f32_ptr %in_b_matptr %c_i32_0 %c_i32_1 %c_i32_1 %c_i32_1 "
 											"%b_loc_first_elem = OpAccessChain %v4f32_ptr %b_loc_arr %c_i32_0 "
 											"%b_loc = OpPtrAccessChain %sb_f32ptr %b_loc_first_elem %c_i32_1 %c_i32_3"};
 
@@ -1845,8 +1848,10 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 
 		for (int indexLevel = 0; indexLevel < numLevels; ++indexLevel)
 		{
-			baseOffset						= getBaseOffset(indexesForLevel[indexLevel][0],
-															indexesForLevel[indexLevel][1],
+			// index into the outer structure must be zero since the outer structure has only 1 member.
+			DE_ASSERT(indexesForLevel[indexLevel][0] == 0);
+
+			baseOffset						= getBaseOffset(indexesForLevel[indexLevel][1],
 															indexesForLevel[indexLevel][2],
 															indexesForLevel[indexLevel][3],
 															indexesForLevel[indexLevel][4],
@@ -1871,8 +1876,8 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputA))));
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputB))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, selectedInput[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -1894,8 +1899,8 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputA))));
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputB))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, selectedInput[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -1927,8 +1932,8 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputA))));
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputB))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, selectedInput[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -1954,8 +1959,8 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputA))));
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputB))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, selectedInput[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -1978,8 +1983,8 @@ void addTwoInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGroup*
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputA))));
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputB))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputA)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputB)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, selectedInput[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -2069,6 +2074,7 @@ void addSingleInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGro
 
 		"OpDecorate %input			DescriptorSet 0				\n"
 		"OpDecorate %input			Binding 0					\n"
+		"OpDecorate %input			NonWritable					\n"
 	);
 
 	const StringTemplate preMain		(
@@ -2140,7 +2146,7 @@ void addSingleInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGro
 	);
 
 	const StringTemplate testFunction	(
-		"%test_code		= OpFunction %v4f32 None %v4f32_function\n"
+		"%test_code		= OpFunction %v4f32 None %v4f32_v4f32_function\n"
 		"%param			= OpFunctionParameter %v4f32\n"
 		"%entry			= OpLabel\n"
 
@@ -2278,7 +2284,7 @@ void addSingleInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGro
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBuffer))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBuffer)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, inputBuffer[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -2306,7 +2312,7 @@ void addSingleInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGro
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBuffer))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBuffer)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, inputBuffer[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -2344,7 +2350,7 @@ void addSingleInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGro
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBuffer))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBuffer)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, inputBuffer[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -2377,7 +2383,7 @@ void addSingleInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGro
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBuffer))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBuffer)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, inputBuffer[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -2406,7 +2412,7 @@ void addSingleInputBufferReadOnlyVariablePointersGraphicsGroup (tcu::TestCaseGro
 				fragments["decoration"]			= decoration.specialize(specs);
 				fragments["pre_main"]			= preMain.specialize(specs);
 				fragments["testfun"]			= testFunction.specialize(specs);
-				resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(inputBuffer))));
+				resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(inputBuffer)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 				getExpectedOutputColor(defaultColors, expectedColors, inputBuffer[baseOffset]);
 				createTestsForAllStages(name.c_str(), defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 			}
@@ -2441,6 +2447,7 @@ void addNullptrVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 		// Decorations
 		"OpDecorate %input DescriptorSet 0				\n"
 		"OpDecorate %input Binding 0					\n"
+		"OpDecorate %input NonWritable					\n"
 
 		// Set the Block decoration
 		"OpDecorate %float_struct	Block				\n"
@@ -2466,11 +2473,10 @@ void addNullptrVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 
 		// VARIABLES
 		"%input				= OpVariable %float_struct_ptr	StorageBuffer				\n"
-		"%float_var			= OpVariable %sb_f32ptr			StorageBuffer %c_null_ptr	\n"
 	);
 
 	const StringTemplate testFunction	(
-		"%test_code		= OpFunction %v4f32 None %v4f32_function\n"
+		"%test_code		= OpFunction %v4f32 None %v4f32_v4f32_function\n"
 		"%param			= OpFunctionParameter %v4f32\n"
 		"%entry			= OpLabel\n"
 
@@ -2488,7 +2494,7 @@ void addNullptrVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 		"OpReturnValue %output_color\n"
 		"OpFunctionEnd\n");
 
-	// float_var has been inintialized to NULL.
+	// f32_ptr_var has been inintialized to NULL.
 	// Now set it to the input variable and return it as output
 	{
 		GraphicsResources				resources;
@@ -2500,7 +2506,7 @@ void addNullptrVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 		fragments["decoration"]			= decoration.specialize(specs);
 		fragments["pre_main"]			= preMain.specialize(specs);
 		fragments["testfun"]			= testFunction.specialize(specs);
-		resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(input))));
+		resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(input)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 		createTestsForAllStages("opvariable_initialized_null", defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 	}
 	// Use OpSelect to choose between nullptr and a valid pointer. Since we can't dereference nullptr,
@@ -2513,7 +2519,7 @@ void addNullptrVariablePointersGraphicsGroup (tcu::TestCaseGroup* testGroup)
 		fragments["decoration"]			= decoration.specialize(specs);
 		fragments["pre_main"]			= preMain.specialize(specs);
 		fragments["testfun"]			= testFunction.specialize(specs);
-		resources.inputs.push_back(std::make_pair(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufferSp(new Float32Buffer(input))));
+		resources.inputs.push_back(Resource(BufferSp(new Float32Buffer(input)), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
 		createTestsForAllStages("opselect_null_or_valid_ptr", defaultColors, expectedColors, fragments, resources, extensions, testGroup, requiredFeatures);
 	}
 }

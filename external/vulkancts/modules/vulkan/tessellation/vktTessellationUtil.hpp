@@ -110,7 +110,7 @@ public:
 															   , m_patchControlPoints		(1u)
 															   , m_blendEnable				(false)
 															   , m_primitiveTopology		(vk::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
-															   , m_tessellationDomainOrigin	(tcu::nothing<vk::VkTessellationDomainOriginKHR>()) {}
+															   , m_tessellationDomainOrigin	(tcu::nothing<vk::VkTessellationDomainOrigin>()) {}
 
 	GraphicsPipelineBuilder&	setRenderSize					(const tcu::IVec2& size) { m_renderSize = size; return *this; }
 	GraphicsPipelineBuilder&	setShader						(const vk::DeviceInterface& vk, const vk::VkDevice device, const vk::VkShaderStageFlagBits stage, const vk::ProgramBinary& binary, const vk::VkSpecializationInfo* specInfo);
@@ -128,9 +128,9 @@ public:
 	//! Basic vertex input configuration (uses biding 0, location 0, etc.)
 	GraphicsPipelineBuilder&	setVertexInputSingleAttribute	(const vk::VkFormat vertexFormat, const deUint32 stride);
 
-	//! If tessellation domain origin is set, pipeline requires VK_KHR_maintenance2
-	GraphicsPipelineBuilder&	setTessellationDomainOrigin		(const vk::VkTessellationDomainOriginKHR domainOrigin) { return setTessellationDomainOrigin(tcu::just(domainOrigin)); }
-	GraphicsPipelineBuilder&	setTessellationDomainOrigin		(const tcu::Maybe<vk::VkTessellationDomainOriginKHR>& domainOrigin) { m_tessellationDomainOrigin = domainOrigin; return *this; }
+	//! If tessellation domain origin is set, pipeline requires VK__maintenance2
+	GraphicsPipelineBuilder&	setTessellationDomainOrigin		(const vk::VkTessellationDomainOrigin domainOrigin) { return setTessellationDomainOrigin(tcu::just(domainOrigin)); }
+	GraphicsPipelineBuilder&	setTessellationDomainOrigin		(const tcu::Maybe<vk::VkTessellationDomainOrigin>& domainOrigin) { m_tessellationDomainOrigin = domainOrigin; return *this; }
 
 	vk::Move<vk::VkPipeline>	build							(const vk::DeviceInterface& vk, const vk::VkDevice device, const vk::VkPipelineLayout pipelineLayout, const vk::VkRenderPass renderPass);
 
@@ -150,7 +150,7 @@ private:
 	deUint32											m_patchControlPoints;
 	bool												m_blendEnable;
 	vk::VkPrimitiveTopology								m_primitiveTopology;
-	tcu::Maybe<vk::VkTessellationDomainOriginKHR>		m_tessellationDomainOrigin;
+	tcu::Maybe<vk::VkTessellationDomainOrigin>			m_tessellationDomainOrigin;
 
 	GraphicsPipelineBuilder (const GraphicsPipelineBuilder&); // "deleted"
 	GraphicsPipelineBuilder& operator= (const GraphicsPipelineBuilder&);
@@ -214,23 +214,13 @@ vk::Move<vk::VkDescriptorSet>	makeDescriptorSet							(const vk::DeviceInterface
 vk::Move<vk::VkPipelineLayout>	makePipelineLayout							(const vk::DeviceInterface& vk, const vk::VkDevice device, const vk::VkDescriptorSetLayout descriptorSetLayout);
 vk::Move<vk::VkPipelineLayout>	makePipelineLayoutWithoutDescriptors		(const vk::DeviceInterface& vk, const vk::VkDevice device);
 vk::Move<vk::VkPipeline>		makeComputePipeline							(const vk::DeviceInterface& vk, const vk::VkDevice device, const vk::VkPipelineLayout pipelineLayout, const vk::VkShaderModule shaderModule, const vk::VkSpecializationInfo* specInfo);
-vk::Move<vk::VkRenderPass>		makeRenderPass								(const vk::DeviceInterface& vk, const vk::VkDevice device, const vk::VkFormat colorFormat);
 vk::Move<vk::VkRenderPass>		makeRenderPassWithoutAttachments			(const vk::DeviceInterface& vk, const vk::VkDevice device);
 vk::Move<vk::VkFramebuffer>		makeFramebuffer								(const vk::DeviceInterface& vk, const vk::VkDevice device, const vk::VkRenderPass renderPass, const vk::VkImageView colorAttachment, const deUint32 width, const deUint32 height, const deUint32 layers);
 vk::Move<vk::VkFramebuffer>		makeFramebufferWithoutAttachments			(const vk::DeviceInterface& vk, const vk::VkDevice device, const vk::VkRenderPass renderPass);
 vk::Move<vk::VkImageView>		makeImageView								(const vk::DeviceInterface& vk, const vk::VkDevice vkDevice, const vk::VkImage image, const vk::VkImageViewType viewType, const vk::VkFormat format, const vk::VkImageSubresourceRange subresourceRange);
 vk::VkBufferImageCopy			makeBufferImageCopy							(const vk::VkExtent3D extent, const vk::VkImageSubresourceLayers subresourceLayers);
-vk::VkBufferMemoryBarrier		makeBufferMemoryBarrier						(const vk::VkAccessFlags srcAccessMask, const vk::VkAccessFlags dstAccessMask, const vk::VkBuffer buffer, const vk::VkDeviceSize offset, const vk::VkDeviceSize bufferSizeBytes);
-vk::VkImageMemoryBarrier		makeImageMemoryBarrier						(const vk::VkAccessFlags srcAccessMask, const vk::VkAccessFlags dstAccessMask, const vk::VkImageLayout oldLayout, const vk::VkImageLayout newLayout, const vk::VkImage image, const vk::VkImageSubresourceRange subresourceRange);
-
-void							beginCommandBuffer							(const vk::DeviceInterface& vk, const vk::VkCommandBuffer commandBuffer);
-void							endCommandBuffer							(const vk::DeviceInterface& vk, const vk::VkCommandBuffer commandBuffer);
-void							submitCommandsAndWait						(const vk::DeviceInterface& vk, const vk::VkDevice device, const vk::VkQueue queue, const vk::VkCommandBuffer commandBuffer);
-void							beginRenderPass								(const vk::DeviceInterface& vk, const vk::VkCommandBuffer commandBuffer, const vk::VkRenderPass renderPass, const vk::VkFramebuffer framebuffer, const vk::VkRect2D& renderArea, const tcu::Vec4& clearColor);
 void							beginRenderPassWithRasterizationDisabled	(const vk::DeviceInterface& vk, const vk::VkCommandBuffer commandBuffer, const vk::VkRenderPass renderPass, const vk::VkFramebuffer framebuffer);
-void							endRenderPass								(const vk::DeviceInterface& vk, const vk::VkCommandBuffer commandBuffer);
 void							requireFeatures								(const vk::InstanceInterface& vki, const vk::VkPhysicalDevice physDevice, const FeatureFlags flags);
-
 float							getClampedTessLevel							(const SpacingMode mode, const float tessLevel);
 int								getRoundedTessLevel							(const SpacingMode mode, const float clampedTessLevel);
 int								getClampedRoundedTessLevel					(const SpacingMode mode, const float tessLevel);

@@ -38,6 +38,7 @@
 #include "vkImageUtil.hpp"
 #include "vkTypeUtil.hpp"
 #include "vkMemUtil.hpp"
+#include "vkCmdUtil.hpp"
 
 #include "deMath.h"
 #include "deRandom.hpp"
@@ -314,6 +315,12 @@ BuiltinFragDepthCaseInstance::BuiltinFragDepthCaseInstance (Context& context, Vk
 
 		if ((formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
 			throw tcu::NotSupportedError("MarkerImage format not supported as storage image");
+
+		if (m_largeDepthEnable && !de::contains(context.getDeviceExtensions().begin(), context.getDeviceExtensions().end(), "VK_EXT_depth_range_unrestricted"))
+			throw tcu::NotSupportedError("large_depth test variants require the VK_EXT_depth_range_unrestricted extension");
+
+		if (m_context.getDeviceFeatures().depthClamp == VK_FALSE && m_depthClampEnable)
+			throw tcu::NotSupportedError("Depthclamp is not supported.");
 	}
 	catch (const vk::Error& e)
 	{
@@ -354,7 +361,6 @@ TestStatus BuiltinFragDepthCaseInstance::iterate (void)
 	MovePtr<Allocation>				depthInitAllocation;
 	Move<VkCommandPool>				cmdPool;
 	Move<VkCommandBuffer>			transferCmdBuffer;
-	Move<VkFence>					fence;
 	Move<VkSampler>					depthSampler;
 
 	// Create Buffer/Image for validation
@@ -612,18 +618,6 @@ TestStatus BuiltinFragDepthCaseInstance::iterate (void)
 		transferCmdBuffer = allocateCommandBuffer(vk, device, &cmdBufferAllocInfo);
 	}
 
-	// Fence for data transfer
-	{
-		const VkFenceCreateInfo fenceCreateInfo =
-		{
-			VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,	// VkStructureType		sType
-			DE_NULL,								// const void*			pNext
-			(VkFenceCreateFlags)0					// VkFenceCreateFlags	flags
-		};
-
-		fence = createFence(vk, device, &fenceCreateInfo);
-	}
-
 	// Initialize Marker Buffer
 	{
 		VkImageAspectFlags	depthImageAspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -674,15 +668,7 @@ TestStatus BuiltinFragDepthCaseInstance::iterate (void)
 			},
 		};
 
-		const VkCommandBufferBeginInfo	cmdBufferBeginInfo =
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,	// VkStructureType					sType
-			DE_NULL,										// const void*						pNext
-			VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,	// VkCommandBufferUsageFlags		flags
-			(const VkCommandBufferInheritanceInfo*)DE_NULL	// VkCommandBufferInheritanceInfo	pInheritanceInfo
-		};
-
-		VK_CHECK(vk.beginCommandBuffer(*transferCmdBuffer, &cmdBufferBeginInfo));
+		beginCommandBuffer(vk, *transferCmdBuffer);
 		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 				(VkDependencyFlags)0,
 				0, (const VkMemoryBarrier*)DE_NULL,
@@ -700,24 +686,9 @@ TestStatus BuiltinFragDepthCaseInstance::iterate (void)
 				0, (const VkBufferMemoryBarrier*)DE_NULL,
 				DE_LENGTH_OF_ARRAY(imagePostBarrier), imagePostBarrier);
 
-		VK_CHECK(vk.endCommandBuffer(*transferCmdBuffer));
+		endCommandBuffer(vk, *transferCmdBuffer);
 
-		const VkSubmitInfo submitInfo =
-		{
-			VK_STRUCTURE_TYPE_SUBMIT_INFO,			// VkStructureType			sType
-			DE_NULL,								// const void*				pNext
-			0u,										// uint32_t					waitSemaphoreCount
-			DE_NULL,								// const VkSemaphore*		pWaitSemaphores
-			(const VkPipelineStageFlags*)DE_NULL,	// const VkPipelineStageFlags*	pWaitDstStageMask
-			1u,										// uint32_t					commandBufferCount
-			&transferCmdBuffer.get(),				// const VkCommandBuffer*	pCommandBuffers
-			0u,										// uint32_t					signalSemaphoreCount
-			DE_NULL									// const VkSemaphore*		pSignalSemaphores
-		};
-
-		VK_CHECK(vk.resetFences(device, 1, &fence.get()));
-		VK_CHECK(vk.queueSubmit(queue, 1, &submitInfo, *fence));
-		VK_CHECK(vk.waitForFences(device, 1, &fence.get(), true, ~(0ull)));
+		submitCommandsAndWait(vk, device, queue, transferCmdBuffer.get());
 	}
 
 
@@ -789,7 +760,6 @@ TestStatus BuiltinFragDepthCaseInstance::iterate (void)
 		drawState.compareOp					= rr::TESTFUNC_ALWAYS;
 		drawState.depthTestEnable			= true;
 		drawState.depthWriteEnable			= true;
-		drawState.depthBoundsTestEnable		= true;
 		drawState.sampleShadingEnable		= true;
 		vulkanProgram.depthImageView		= *depthImageView;
 		vulkanProgram.descriptorSetLayout	= *descriptorSetLayout;
@@ -806,7 +776,6 @@ TestStatus BuiltinFragDepthCaseInstance::iterate (void)
 										vulkanDrawContext.getColorPixels().getHeight(),
 										1,
 										vulkanDrawContext.getColorPixels().getDataPtr()));
-
 	}
 
 	// Barrier to transition between first and second pass
@@ -856,38 +825,15 @@ TestStatus BuiltinFragDepthCaseInstance::iterate (void)
 			}
 		};
 
-		const VkCommandBufferBeginInfo	cmdBufferBeginInfo =
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,	// VkStructureType					sType
-			DE_NULL,										// const void*						pNext
-			VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,	// VkCommandBufferUsageFlags		flags
-			(const VkCommandBufferInheritanceInfo*)DE_NULL	// VkCommandBufferInheritanceInfo	pInheritanceInfo
-		};
-
-		VK_CHECK(vk.beginCommandBuffer(*transferCmdBuffer, &cmdBufferBeginInfo));
-		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		beginCommandBuffer(vk, *transferCmdBuffer);
+		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_HOST_BIT,
 				(VkDependencyFlags)0,
 				0, (const VkMemoryBarrier*)DE_NULL,
 				0, (const VkBufferMemoryBarrier*)DE_NULL,
 				DE_LENGTH_OF_ARRAY(imageBarrier), imageBarrier);
-		VK_CHECK(vk.endCommandBuffer(*transferCmdBuffer));
+		endCommandBuffer(vk, *transferCmdBuffer);
 
-		const VkSubmitInfo submitInfo =
-		{
-			VK_STRUCTURE_TYPE_SUBMIT_INFO,			// VkStructureType			sType
-			DE_NULL,								// const void*				pNext
-			0u,										// uint32_t					waitSemaphoreCount
-			DE_NULL,								// const VkSemaphore*		pWaitSemaphores
-			(const VkPipelineStageFlags*)DE_NULL,	// const VkPipelineStageFlags*	pWaitDstStageMask
-			1u,										// uint32_t					commandBufferCount
-			&transferCmdBuffer.get(),				// const VkCommandBuffer*	pCommandBuffers
-			0u,										// uint32_t					signalSemaphoreCount
-			DE_NULL									// const VkSemaphore*		pSignalSemaphores
-		};
-
-		VK_CHECK(vk.resetFences(device, 1, &fence.get()));
-		VK_CHECK(vk.queueSubmit(queue, 1, &submitInfo, *fence));
-		VK_CHECK(vk.waitForFences(device, 1, &fence.get(), true, ~(0ull)));
+		submitCommandsAndWait(vk, device, queue, transferCmdBuffer.get());
 	}
 
 	// Resolve Depth Buffer
@@ -963,193 +909,22 @@ TestStatus BuiltinFragDepthCaseInstance::iterate (void)
 
 	// Transfer marker buffer
 	{
-		const UVec2 copySize		= UVec2(m_renderSize.x() * m_samples, m_renderSize.y());
-		const VkImageMemoryBarrier imageBarrier =
-		{
-			VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,			// VkStructureType		sType
-			DE_NULL,										// const void*			pNext
-			VK_ACCESS_SHADER_WRITE_BIT,						// VkAccessFlags		srcAccessMask
-			VK_ACCESS_TRANSFER_READ_BIT,					// VkAccessMask			dstAccessMask
-			VK_IMAGE_LAYOUT_GENERAL,						// VkImageLayout		oldLayout
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,			// VkImageLayout		newLayout
-			VK_QUEUE_FAMILY_IGNORED,						// uint32_t				srcQueueFamilyIndex
-			VK_QUEUE_FAMILY_IGNORED,						// uint32_t				dstQueueFamilyIndex
-			*markerImage,									// VkImage				image
-			{
-				VK_IMAGE_ASPECT_COLOR_BIT,				// VkImageAspectFlags	aspectMask
-				0u,										// uint32_t				baseMipLevel
-				1u,										// uint32_t				mipLevels
-				0u,										// uint32_t				baseArray
-				1u										// uint32_t				arraySize
-			}
-		};
+		beginCommandBuffer(vk, *transferCmdBuffer);
+		copyImageToBuffer(vk, *transferCmdBuffer, *markerImage, *markerBuffer, tcu::IVec2(m_renderSize.x() * m_samples, m_renderSize.y()), VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
+		endCommandBuffer(vk, *transferCmdBuffer);
 
-		const VkBufferMemoryBarrier bufferBarrier =
-		{
-			VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,		// VkStructureType		sType
-			DE_NULL,										// const void*			pNext
-			VK_ACCESS_TRANSFER_WRITE_BIT,					// VkAccessFlags		srcAccessMask
-			VK_ACCESS_HOST_READ_BIT,						// VkAccessFlags		dstAccessMask
-			VK_QUEUE_FAMILY_IGNORED,						// uint32_t				srcQueueFamilyIndex
-			VK_QUEUE_FAMILY_IGNORED,						// uint32_t				dstQueueFamilyIndex
-			*markerBuffer,									// VkBufer				buffer
-			0u,												// VkDeviceSize			offset
-			VK_WHOLE_SIZE									// VkDeviceSize			size
-		};
-
-		const VkBufferImageCopy bufferImageCopy =
-		{
-			0u,									// VkDeviceSize		bufferOffset
-			copySize.x(),						// uint32_t			bufferRowLength
-			copySize.y(),						// uint32_t			bufferImageHeight
-			{
-				VK_IMAGE_ASPECT_COLOR_BIT,	// VkImageAspectFlags	aspect
-				0u,							// uint32_t				mipLevel
-				0u,							// uint32_t				baseArrayLayer
-				1u							// uint32_t				layerCount
-			},
-			{ 0, 0, 0 },						// VkOffset3D		imageOffset
-			{
-				copySize.x(),				// uint32_t				width
-				copySize.y(),				// uint32_t				height,
-				1u							// uint32_t				depth
-			}
-		};
-
-		const VkCommandBufferBeginInfo	cmdBufferBeginInfo =
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,	// VkStructureType					sType
-			DE_NULL,										// const void*						pNext
-			VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,	// VkCommandBufferUsageFlags		flags
-			(const VkCommandBufferInheritanceInfo*)DE_NULL	// VkCommandBufferInheritanceInfo	pInheritanceInfo
-		};
-
-		VK_CHECK(vk.beginCommandBuffer(*transferCmdBuffer, &cmdBufferBeginInfo));
-		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-				(VkDependencyFlags)0,
-				0, (const VkMemoryBarrier*)DE_NULL,
-				0, (const VkBufferMemoryBarrier*)DE_NULL,
-				1, &imageBarrier);
-		vk.cmdCopyImageToBuffer(*transferCmdBuffer, *markerImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, *markerBuffer, 1u, &bufferImageCopy);
-		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
-				(VkDependencyFlags)0,
-				0, (const VkMemoryBarrier*)DE_NULL,
-				1, &bufferBarrier,
-				0, (const VkImageMemoryBarrier*)DE_NULL);
-		VK_CHECK(vk.endCommandBuffer(*transferCmdBuffer));
-
-		const VkSubmitInfo submitInfo =
-		{
-			VK_STRUCTURE_TYPE_SUBMIT_INFO,			// VkStructureType			sType
-			DE_NULL,								// const void*				pNext
-			0u,										// uint32_t					waitSemaphoreCount
-			DE_NULL,								// const VkSemaphore*		pWaitSemaphores
-			(const VkPipelineStageFlags*)DE_NULL,	// const VkPipelineStageFlags*	pWaitDstStageMask
-			1u,										// uint32_t					commandBufferCount
-			&transferCmdBuffer.get(),				// const VkCommandBuffer*	pCommandBuffers
-			0u,										// uint32_t					signalSemaphoreCount
-			DE_NULL									// const VkSemaphore*		pSignalSemaphores
-		};
-
-		VK_CHECK(vk.resetFences(device, 1, &fence.get()));
-		VK_CHECK(vk.queueSubmit(queue, 1, &submitInfo, *fence));
-		VK_CHECK(vk.waitForFences(device, 1, &fence.get(), true, ~(0ull)));
+		submitCommandsAndWait(vk, device, queue, transferCmdBuffer.get());
 	}
 
 	// Verify depth buffer
 	{
 		bool status;
 
-		const VkBufferMemoryBarrier bufferBarrier =
-		{
-			VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,			// VkStructureType		sType
-			DE_NULL,											// const void*			pNext
-			VK_ACCESS_TRANSFER_WRITE_BIT,						// VkAccessFlags		srcAccessMask
-			VK_ACCESS_HOST_READ_BIT,							// VkAccessFlags		dstAccessMask
-			VK_QUEUE_FAMILY_IGNORED,							// uint32_t				srcQueueFamilyIndex
-			VK_QUEUE_FAMILY_IGNORED,							// uint32_t				dstQueueFamilyIndex
-			*validationBuffer,									// VkBuffer				buffer
-			0u,													// VkDeviceSize			offset
-			VK_WHOLE_SIZE										// VkDeviceSize			size
-		};
+		beginCommandBuffer(vk, *transferCmdBuffer, 0u);
+		copyImageToBuffer(vk, *transferCmdBuffer, *depthResolveImage, *validationBuffer, tcu::IVec2(m_renderSize.x() * m_samples, m_renderSize.y()), VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
+		endCommandBuffer(vk, *transferCmdBuffer);
 
-		const VkImageMemoryBarrier imageBarrier =
-		{
-			VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,				// VkStructureType		sType
-			DE_NULL,											// const void*			pNext
-			VK_ACCESS_SHADER_WRITE_BIT,							// VkAccessFlags		srcAccessMask
-			VK_ACCESS_TRANSFER_READ_BIT,						// VkAccessFlags		dstAccessMask
-			VK_IMAGE_LAYOUT_GENERAL,							// VkImageLayout		oldLayout
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,				// VkImageLayout		newLayout
-			VK_QUEUE_FAMILY_IGNORED,							// uint32_t				srcQueueFamilyIndex
-			VK_QUEUE_FAMILY_IGNORED,							// uint32_t				dstQueueFamilyIndex
-			*depthResolveImage,									// VkImage				image
-			{
-				VK_IMAGE_ASPECT_COLOR_BIT,				// VkImageAspectFlags	aspectMask
-				0u,										// uint32_t				baseMipLevel
-				1u,										// uint32_t				mipLevels,
-				0u,										// uint32_t				baseArray
-				1u,										// uint32_t				arraySize
-			}
-		};
-
-		const VkBufferImageCopy bufferImageCopy =
-		{
-			0u,													// VkDeviceSize			bufferOffset
-			m_samples * m_renderSize.x(),						// uint32_t				bufferRowLength
-			m_renderSize.y(),									// uint32_t				bufferImageHeight
-			{
-				VK_IMAGE_ASPECT_COLOR_BIT,				// VkImageAspectFlags	aspect
-				0u,										// uint32_t				mipLevel
-				0u,										// uint32_t				baseArrayLayer
-				1u										// uint32_t				layerCount
-			},
-			{ 0, 0, 0 },										// VkOffset3D			imageOffset
-			{
-				m_samples * m_renderSize.x(),			// uint32_t				width
-				m_renderSize.y(),						// uint32_t				height
-				1u										// uint32_t				depth
-			}
-		};
-
-		const VkCommandBufferBeginInfo	cmdBufferBeginInfo =
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,	// VkStructureType					sType
-			DE_NULL,										// const void*						pNext
-			VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,	// VkCommandBufferUsageFlags		flags
-			(const VkCommandBufferInheritanceInfo*)DE_NULL	// VkCommandBufferInheritanceInfo	pInheritanceInfo
-		};
-
-		VK_CHECK(vk.beginCommandBuffer(*transferCmdBuffer, &cmdBufferBeginInfo));
-		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-				(VkDependencyFlags)0,
-				0, (const VkMemoryBarrier*)DE_NULL,
-				0, (const VkBufferMemoryBarrier*)DE_NULL,
-				1, &imageBarrier);
-		vk.cmdCopyImageToBuffer(*transferCmdBuffer, *depthResolveImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, *validationBuffer, 1u, &bufferImageCopy);
-		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
-				(VkDependencyFlags)0,
-				0, (const VkMemoryBarrier*)DE_NULL,
-				1, &bufferBarrier,
-				0, (const VkImageMemoryBarrier*)DE_NULL);
-		VK_CHECK(vk.endCommandBuffer(*transferCmdBuffer));
-
-		const VkSubmitInfo submitInfo =
-		{
-			VK_STRUCTURE_TYPE_SUBMIT_INFO,			// VkStructureType			sType
-			DE_NULL,								// const void*				pNext
-			0u,										// uint32_t					waitSemaphoreCount
-			DE_NULL,								// const VkSemaphore*		pWaitSemaphores
-			(const VkPipelineStageFlags*)DE_NULL,	// const VkPipelineStageFlags*	pWaitDstStageMask
-			1u,										// uint32_t					commandBufferCount
-			&transferCmdBuffer.get(),				// const VkCommandBuffer*	pCommandBuffers
-			0u,										// uint32_t					signalSemaphoreCount
-			DE_NULL									// const VkSemaphore*		pSignalSemaphores
-		};
-
-		VK_CHECK(vk.resetFences(device, 1, &fence.get()));
-		VK_CHECK(vk.queueSubmit(queue, 1, &submitInfo, *fence));
-		VK_CHECK(vk.waitForFences(device, 1, &fence.get(), true, ~(0ull)));
+		submitCommandsAndWait(vk, device, queue, transferCmdBuffer.get());
 
 		invalidateMappedMemoryRange(vk, device, validationAlloc->getMemory(), validationAlloc->getOffset(), VK_WHOLE_SIZE);
 		invalidateMappedMemoryRange(vk, device, markerBufferAllocation->getMemory(), markerBufferAllocation->getOffset(), VK_WHOLE_SIZE);
@@ -1185,12 +960,6 @@ bool BuiltinFragDepthCaseInstance::validateDepthBuffer (const tcu::ConstPixelBuf
 
 			if (m_largeDepthEnable)
 				expectedValue += m_largeDepthBase;
-
-			if (expectedValue > 1.0f)
-				expectedValue = 1.0f;
-
-			if (expectedValue < 0.0f)
-				expectedValue = 0.0f;
 
 			for (deUint32 sampleNdx = 0; sampleNdx < (deUint32)m_samples; sampleNdx++)
 			{
@@ -1292,7 +1061,6 @@ TestStatus BuiltinFragCoordMsaaCaseInstance::iterate (void)
 	MovePtr<Allocation>				sampleLocationBufferAllocation;
 	Move<VkCommandPool>				cmdPool;
 	Move<VkCommandBuffer>			transferCmdBuffer;
-	Move<VkFence>					fence;
 
 	// Coordinate result image
 	{
@@ -1415,18 +1183,6 @@ TestStatus BuiltinFragCoordMsaaCaseInstance::iterate (void)
 		transferCmdBuffer = allocateCommandBuffer(vk, device, &cmdBufferAllocInfo);
 	}
 
-	// Fence for data transfer
-	{
-		const VkFenceCreateInfo fenceCreateInfo =
-		{
-			VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,	// VkStructureType		sType
-			DE_NULL,								// const void*			pNext
-			(VkFenceCreateFlags)0					// VkFenceCreateFlags	flags
-		};
-
-		fence = createFence(vk, device, &fenceCreateInfo);
-	}
-
 	// Transition the output image to LAYOUT_GENERAL
 	{
 		const VkImageMemoryBarrier barrier =
@@ -1449,39 +1205,16 @@ TestStatus BuiltinFragCoordMsaaCaseInstance::iterate (void)
 			}
 		};
 
-		const VkCommandBufferBeginInfo cmdBufferBeginInfo =
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,		// VkStructureType					sType
-			DE_NULL,											// const void*						pNext
-			VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,		// VkCommandBufferUsageFlags		flags
-			(const VkCommandBufferInheritanceInfo*)DE_NULL		// VkCommandBufferInheritanceInfo	pInheritanceInfo
-		};
-
-		VK_CHECK(vk.beginCommandBuffer(*transferCmdBuffer, &cmdBufferBeginInfo));
-		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+		beginCommandBuffer(vk, *transferCmdBuffer);
+		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 				(VkDependencyFlags)0,
 				0, (const VkMemoryBarrier*)DE_NULL,
 				0, (const VkBufferMemoryBarrier*)DE_NULL,
 				1, &barrier);
 
-		VK_CHECK(vk.endCommandBuffer(*transferCmdBuffer));
+		endCommandBuffer(vk, *transferCmdBuffer);
 
-		const VkSubmitInfo submitInfo =
-		{
-			VK_STRUCTURE_TYPE_SUBMIT_INFO,			// VkStructureType			sType
-			DE_NULL,								// const void*				pNext
-			0u,										// uint32_t					waitSemaphoreCount
-			DE_NULL,								// const VkSemaphore*		pWaitSemaphores
-			(const VkPipelineStageFlags*)DE_NULL,	// const VkPipelineStageFlags*	pWaitDstStageMask
-			1u,										// uint32_t					commandBufferCount
-			&transferCmdBuffer.get(),				// const VkCommandBuffer*	pCommandBuffers
-			0u,										// uint32_t					signalSemaphoreCount
-			DE_NULL									// const VkSemaphore*		pSignalSemaphores
-		};
-
-		vk.resetFences(device, 1, &fence.get());
-		vk.queueSubmit(queue, 1, &submitInfo, *fence);
-		vk.waitForFences(device, 1, &fence.get(), true, ~(0ull));
+		submitCommandsAndWait(vk, device, queue, transferCmdBuffer.get());
 	}
 
 	// Perform draw
@@ -1521,98 +1254,13 @@ TestStatus BuiltinFragCoordMsaaCaseInstance::iterate (void)
 
 	// Transfer location image to buffer
 	{
-		const VkImageMemoryBarrier imageBarrier =
-		{
-			VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,			// VkStructureType		sType
-			DE_NULL,										// const void*			pNext
-			VK_ACCESS_SHADER_WRITE_BIT,						// VkAccessFlags		srcAccessMask
-			VK_ACCESS_TRANSFER_READ_BIT,					// VkAccessMask			dstAccessMask
-			VK_IMAGE_LAYOUT_GENERAL,						// VkImageLayout		oldLayout
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,			// VkImageLayout		newLayout
-			VK_QUEUE_FAMILY_IGNORED,						// uint32_t				srcQueueFamilyIndex
-			VK_QUEUE_FAMILY_IGNORED,						// uint32_t				dstQueueFamilyIndex
-			*outputImage,									// VkImage				image
-			{
-				VK_IMAGE_ASPECT_COLOR_BIT,				// VkImageAspectFlags	aspectMask
-				0u,										// uint32_t				baseMipLevel
-				1u,										// uint32_t				mipLevels
-				0u,										// uint32_t				baseArray
-				1u										// uint32_t				arraySize
-			}
-		};
+		beginCommandBuffer(vk, *transferCmdBuffer);
+		copyImageToBuffer(vk, *transferCmdBuffer, *outputImage, *sampleLocationBuffer, tcu::IVec2(m_renderSize.x() * m_sampleCount, m_renderSize.y()), VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
+		endCommandBuffer(vk, *transferCmdBuffer);
 
-		const VkBufferMemoryBarrier bufferBarrier =
-		{
-			VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,		// VkStructureType		sType
-			DE_NULL,										// const void*			pNext
-			VK_ACCESS_TRANSFER_WRITE_BIT,					// VkAccessFlags		srcAccessMask
-			VK_ACCESS_HOST_READ_BIT,						// VkAccessFlags		dstAccessMask
-			VK_QUEUE_FAMILY_IGNORED,						// uint32_t				srcQueueFamilyIndex
-			VK_QUEUE_FAMILY_IGNORED,						// uint32_t				dstQueueFamilyIndex
-			*sampleLocationBuffer,							// VkBufer				buffer
-			0u,												// VkDeviceSize			offset
-			VK_WHOLE_SIZE									// VkDeviceSize			size
-		};
+		submitCommandsAndWait(vk, device, queue, transferCmdBuffer.get());
 
-		const VkBufferImageCopy bufferImageCopy =
-		{
-			0u,									// VkDeviceSize		bufferOffset
-			m_sampleCount * m_renderSize.x(),	// uint32_t			bufferRowLength
-			m_renderSize.y(),					// uint32_t			bufferImageHeight
-			{
-				VK_IMAGE_ASPECT_COLOR_BIT,	// VkImageAspectFlags	aspect
-				0u,							// uint32_t				mipLevel
-				0u,							// uint32_t				baseArrayLayer
-				1u							// uint32_t				layerCount
-			},
-			{ 0, 0, 0 },						// VkOffset3D		imageOffset
-			{
-				m_sampleCount * m_renderSize.x(),	// uint32_t				width
-				m_renderSize.y(),			// uint32_t				height,
-				1u							// uint32_t				depth
-			}
-		};
-
-		const VkCommandBufferBeginInfo	cmdBufferBeginInfo =
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,	// VkStructureType					sType
-			DE_NULL,										// const void*						pNext
-			VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,	// VkCommandBufferUsageFlags		flags
-			(const VkCommandBufferInheritanceInfo*)DE_NULL	// VkCommandBufferInheritanceInfo	pInheritanceInfo
-		};
-
-		VK_CHECK(vk.beginCommandBuffer(*transferCmdBuffer, &cmdBufferBeginInfo));
-		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-				(VkDependencyFlags)0,
-				0, (const VkMemoryBarrier*)DE_NULL,
-				0, (const VkBufferMemoryBarrier*)DE_NULL,
-				1, &imageBarrier);
-		vk.cmdCopyImageToBuffer(*transferCmdBuffer, *outputImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, *sampleLocationBuffer, 1u, &bufferImageCopy);
-		vk.cmdPipelineBarrier(*transferCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
-				(VkDependencyFlags)0,
-				0, (const VkMemoryBarrier*)DE_NULL,
-				1, &bufferBarrier,
-				0, (const VkImageMemoryBarrier*)DE_NULL);
-		VK_CHECK(vk.endCommandBuffer(*transferCmdBuffer));
-
-		const VkSubmitInfo submitInfo =
-		{
-			VK_STRUCTURE_TYPE_SUBMIT_INFO,			// VkStructureType			sType
-			DE_NULL,								// const void*				pNext
-			0u,										// uint32_t					waitSemaphoreCount
-			DE_NULL,								// const VkSemaphore*		pWaitSemaphores
-			(const VkPipelineStageFlags*)DE_NULL,	// const VkPipelineStageFlags*	pWaitDstStageMask
-			1u,										// uint32_t					commandBufferCount
-			&transferCmdBuffer.get(),				// const VkCommandBuffer*	pCommandBuffers
-			0u,										// uint32_t					signalSemaphoreCount
-			DE_NULL									// const VkSemaphore*		pSignalSemaphores
-		};
-
-		vk.resetFences(device, 1, &fence.get());
-		vk.queueSubmit(queue, 1, &submitInfo, *fence);
-		vk.waitForFences(device, 1, &fence.get(), true, ~(0ull));
-
-		invalidateMappedMemoryRange(vk, device, sampleLocationBufferAllocation->getMemory(), sampleLocationBufferAllocation->getOffset(), VK_WHOLE_SIZE);
+		invalidateAlloc(vk, device, *sampleLocationBufferAllocation);
 	}
 
 	// Validate result
@@ -1841,6 +1489,7 @@ void BuiltinFragDepthCase::initPrograms (SourceCollections& programCollection) c
 				<< "void main()\n"
 				<< "{\n"
 				<< "	gl_Position = position;\n"
+				<< "	gl_PointSize = 1.0;\n"
 				<< "}\n";
 			programCollection.glslSources.add("FragDepthVert") << glu::VertexSource(vertexSource.str());
 		}
@@ -1855,6 +1504,7 @@ void BuiltinFragDepthCase::initPrograms (SourceCollections& programCollection) c
 				<< "void main()\n"
 				<< "{\n"
 				<< "	gl_Position = position;\n"
+				<< "	gl_PointSize = 1.0;\n"
 				<< "	texCoord = position.xy/2 + vec2(0.5);\n"
 				<< "}\n";
 			programCollection.glslSources.add("FragDepthVertPass2") << glu::VertexSource(vertexSource.str());
@@ -1947,7 +1597,7 @@ TestStatus BuiltinGlFragCoordXYZCaseInstance::iterate (void)
 	const UVec2		viewportSize	= getViewportSize();
 	const int		width			= viewportSize.x();
 	const int		height			= viewportSize.y();
-	const tcu::Vec3	scale			(1.f / float(width), 1.f / float(height), 1.0f);
+	const tcu::Vec3	scale			(1.0f / float(width), 1.0f / float(height), 1.0f);
 	const float		precision		= 0.00001f;
 	const deUint16	indices[6]		=
 	{
@@ -2168,17 +1818,28 @@ TestInstance* BuiltinGlFragCoordWCase::createInstance (Context& context) const
 	return new BuiltinGlFragCoordWCaseInstance(context);
 }
 
+enum
+{
+	POINTCOORD_VARIANT_DEFAULT,
+	POINTCOORD_VARIANT_UNIFORM_VERTEX,
+	POINTCOORD_VARIANT_UNIFORM_FRAGMENT
+};
+
+
 class BuiltinGlPointCoordCaseInstance : public ShaderRenderCaseInstance
 {
 public:
-					BuiltinGlPointCoordCaseInstance	(Context& context);
+					BuiltinGlPointCoordCaseInstance	(Context& context, int testVariant);
 
 	TestStatus		iterate								(void);
 	virtual void	setupDefaultInputs					(void);
+private:
+	int				variant;
 };
 
-BuiltinGlPointCoordCaseInstance::BuiltinGlPointCoordCaseInstance (Context& context)
-	: ShaderRenderCaseInstance	(context)
+BuiltinGlPointCoordCaseInstance::BuiltinGlPointCoordCaseInstance (Context& context, int testVariant)
+	: ShaderRenderCaseInstance	(context),
+	  variant(testVariant)
 {
 }
 
@@ -2194,6 +1855,7 @@ TestStatus BuiltinGlPointCoordCaseInstance::iterate (void)
 	Surface					resImage		(width, height);
 	Surface					refImage		(width, height);
 	bool					compareOk		= false;
+	const tcu::Vec3			scale(1.0f / float(width), 1.0f / float(height), 1.0f);
 
 	// Compute coordinates.
 	{
@@ -2213,6 +1875,10 @@ TestStatus BuiltinGlPointCoordCaseInstance::iterate (void)
 	}
 
 	setup();
+
+	if (variant == POINTCOORD_VARIANT_UNIFORM_VERTEX || variant == POINTCOORD_VARIANT_UNIFORM_FRAGMENT)
+		addUniform(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, scale);
+
 	addAttribute(0u, VK_FORMAT_R32G32B32_SFLOAT, deUint32(sizeof(Vec3)), numPoints, &coords[0]);
 	render(numPoints, 0, DE_NULL, VK_PRIMITIVE_TOPOLOGY_POINT_LIST);
 	copy(resImage.getAccess(), getResultImage().getAccess());
@@ -2222,8 +1888,15 @@ TestStatus BuiltinGlPointCoordCaseInstance::iterate (void)
 
 	for (vector<Vec3>::const_iterator pointIter = coords.begin(); pointIter != coords.end(); ++pointIter)
 	{
-		const float	centerX	= float(width) *(pointIter->x()*0.5f + 0.5f);
-		const float	centerY	= float(height)*(pointIter->y()*0.5f + 0.5f);
+		float x = pointIter->x();
+		float y = pointIter->y();
+		if (variant == POINTCOORD_VARIANT_UNIFORM_VERTEX)
+		{
+			x *= scale.m_data[0];
+			y *= scale.m_data[1];
+		}
+		const float	centerX	= float(width) *(x*0.5f + 0.5f);
+		const float	centerY	= float(height)*(y*0.5f + 0.5f);
 		const float	size	= pointIter->z();
 		const int	x0		= deRoundFloatToInt32(centerX - size*0.5f);
 		const int	y0		= deRoundFloatToInt32(centerY - size*0.5f);
@@ -2242,7 +1915,14 @@ TestStatus BuiltinGlPointCoordCaseInstance::iterate (void)
 				const float		fragY	= float(dy) + 0.5f;
 				const float		s		= 0.5f + (fragX - centerX) / size;
 				const float		t		= 0.5f + (fragY - centerY) / size;
-				const Vec4		color	(s, t, 0.0f, 1.0f);
+				Vec4			color	(s, t, 0.0f, 1.0f);
+
+				if (variant == POINTCOORD_VARIANT_UNIFORM_FRAGMENT)
+				{
+					color.m_data[0] *= scale.m_data[0];
+					color.m_data[1] *= scale.m_data[1];
+					color.m_data[2] *= scale.m_data[2];
+				}
 
 				if (de::inBounds(dx, 0, refImage.getWidth()) && de::inBounds(dy, 0, refImage.getHeight()))
 					refImage.setPixel(dx, dy, RGBA(color));
@@ -2265,19 +1945,21 @@ void BuiltinGlPointCoordCaseInstance::setupDefaultInputs (void)
 class BuiltinGlPointCoordCase : public TestCase
 {
 public:
-								BuiltinGlPointCoordCase	(TestContext& testCtx, const string& name, const string& description);
+								BuiltinGlPointCoordCase	(TestContext& testCtx, const string& name, const string& description, int testVariant);
 	virtual						~BuiltinGlPointCoordCase	(void);
 
 	void						initPrograms				(SourceCollections& dst) const;
 	TestInstance*				createInstance				(Context& context) const;
 
 private:
+	int							variant;
 								BuiltinGlPointCoordCase	(const BuiltinGlPointCoordCase&);	// not allowed!
 	BuiltinGlPointCoordCase&	operator=					(const BuiltinGlPointCoordCase&);	// not allowed!
 };
 
-BuiltinGlPointCoordCase::BuiltinGlPointCoordCase (TestContext& testCtx, const string& name, const string& description)
-	: TestCase(testCtx, name, description)
+BuiltinGlPointCoordCase::BuiltinGlPointCoordCase (TestContext& testCtx, const string& name, const string& description, int testVariant)
+	: TestCase(testCtx, name, description),
+	  variant(testVariant)
 {
 }
 
@@ -2287,27 +1969,69 @@ BuiltinGlPointCoordCase::~BuiltinGlPointCoordCase (void)
 
 void BuiltinGlPointCoordCase::initPrograms (SourceCollections& dst) const
 {
-	dst.glslSources.add("vert") << glu::VertexSource(
-		"#version 310 es\n"
-		"layout(location = 0) in highp vec3 a_position;\n"
-		"void main (void)\n"
-		"{\n"
-		"    gl_Position = vec4(a_position.xy, 0.0, 1.0);\n"
-		"    gl_PointSize = a_position.z;\n"
-		"}\n");
+	switch (variant)
+	{
+	case POINTCOORD_VARIANT_UNIFORM_FRAGMENT:
+		dst.glslSources.add("vert") << glu::VertexSource(
+			"#version 310 es\n"
+			"layout(location = 0) in highp vec3 a_position;\n"
+			"void main (void)\n"
+			"{\n"
+			"    gl_Position = vec4(a_position.xy, 0.0, 1.0);\n"
+			"    gl_PointSize = a_position.z;\n"
+			"}\n");
 
-	dst.glslSources.add("frag") << glu::FragmentSource(
-		"#version 310 es\n"
-		"layout(location = 0) out lowp vec4 o_color;\n"
-		"void main (void)\n"
-		"{\n"
-		"    o_color = vec4(gl_PointCoord, 0.0, 1.0);\n"
-		"}\n");
+		dst.glslSources.add("frag") << glu::FragmentSource(
+			"#version 310 es\n"
+			"layout(set=0, binding=0) uniform Scale { highp vec3 u_scale; };\n"
+			"layout(location = 0) out lowp vec4 o_color;\n"
+			"void main (void)\n"
+			"{\n"
+			"    o_color = vec4(gl_PointCoord, 0.0, 1.0) * vec4(u_scale, 1.0);\n"
+			"}\n");
+		break;
+	case POINTCOORD_VARIANT_UNIFORM_VERTEX:
+		dst.glslSources.add("vert") << glu::VertexSource(
+			"#version 310 es\n"
+			"layout(set=0, binding=0) uniform Scale { highp vec3 u_scale; };\n"
+			"layout(location = 0) in highp vec3 a_position;\n"
+			"void main (void)\n"
+			"{\n"
+			"    gl_Position = vec4(a_position.xy, 0.0, 1.0) * vec4(u_scale, 1.0);\n"
+			"    gl_PointSize = a_position.z;\n"
+			"}\n");
+
+		dst.glslSources.add("frag") << glu::FragmentSource(
+			"#version 310 es\n"
+			"layout(location = 0) out lowp vec4 o_color;\n"
+			"void main (void)\n"
+			"{\n"
+			"    o_color = vec4(gl_PointCoord, 0.0, 1.0);\n"
+			"}\n");
+		break;
+	default: // POINTCOORD_VARIANT_DEFAULT
+		dst.glslSources.add("vert") << glu::VertexSource(
+			"#version 310 es\n"
+			"layout(location = 0) in highp vec3 a_position;\n"
+			"void main (void)\n"
+			"{\n"
+			"    gl_Position = vec4(a_position.xy, 0.0, 1.0);\n"
+			"    gl_PointSize = a_position.z;\n"
+			"}\n");
+
+		dst.glslSources.add("frag") << glu::FragmentSource(
+			"#version 310 es\n"
+			"layout(location = 0) out lowp vec4 o_color;\n"
+			"void main (void)\n"
+			"{\n"
+			"    o_color = vec4(gl_PointCoord, 0.0, 1.0);\n"
+			"}\n");
+	}
 }
 
 TestInstance* BuiltinGlPointCoordCase::createInstance (Context& context) const
 {
-	return new BuiltinGlPointCoordCaseInstance(context);
+	return new BuiltinGlPointCoordCaseInstance(context, variant);
 }
 
 enum ShaderInputTypeBits
@@ -2571,7 +2295,9 @@ TestCaseGroup* createBuiltinVarTests (TestContext& testCtx)
 
 	simpleGroup->addChild(new BuiltinGlFragCoordXYZCase(testCtx, "fragcoord_xyz", "FragCoord xyz test"));
 	simpleGroup->addChild(new BuiltinGlFragCoordWCase(testCtx, "fragcoord_w", "FragCoord w test"));
-	simpleGroup->addChild(new BuiltinGlPointCoordCase(testCtx, "pointcoord", "PointCoord test"));
+	simpleGroup->addChild(new BuiltinGlPointCoordCase(testCtx, "pointcoord", "PointCoord test", POINTCOORD_VARIANT_DEFAULT));
+	simpleGroup->addChild(new BuiltinGlPointCoordCase(testCtx, "pointcoord_uniform_frag", "PointCoord test with fragment uniform", POINTCOORD_VARIANT_UNIFORM_FRAGMENT));
+	simpleGroup->addChild(new BuiltinGlPointCoordCase(testCtx, "pointcoord_uniform_vert", "PointCoord test with vertex uniform", POINTCOORD_VARIANT_UNIFORM_VERTEX));
 
 	// FragCoord_msaa
 	{

@@ -32,11 +32,14 @@
 #include "tcuMaybe.hpp"
 
 #include "vkDefs.hpp"
+#include "vkBarrierUtil.hpp"
 #include "vkQueryUtil.hpp"
 #include "vkBuilderUtil.hpp"
 #include "vkImageUtil.hpp"
 #include "vkTypeUtil.hpp"
 #include "vkStrUtil.hpp"
+#include "vkCmdUtil.hpp"
+#include "vkObjUtil.hpp"
 
 #include "deUniquePtr.hpp"
 
@@ -75,12 +78,12 @@ inline VkFrontFace mapFrontFace (const Winding winding)
 bool verifyResultImage (tcu::TestLog&						log,
 						const tcu::ConstPixelBufferAccess	image,
 						const TessPrimitiveType				primitiveType,
-						const VkTessellationDomainOriginKHR	domainOrigin,
+						const VkTessellationDomainOrigin	domainOrigin,
 						const Winding						winding,
 						bool								yFlip,
 						const Winding						frontFaceWinding)
 {
-	const bool			expectVisiblePrimitive	= ((frontFaceWinding == winding) == (domainOrigin == VK_TESSELLATION_DOMAIN_ORIGIN_UPPER_LEFT_KHR)) != yFlip;
+	const bool			expectVisiblePrimitive	= ((frontFaceWinding == winding) == (domainOrigin == VK_TESSELLATION_DOMAIN_ORIGIN_UPPER_LEFT)) != yFlip;
 
 	const int			totalNumPixels			= image.getWidth()*image.getHeight();
 
@@ -183,7 +186,7 @@ bool verifyResultImage (tcu::TestLog&						log,
 	return true;
 }
 
-typedef tcu::Maybe<VkTessellationDomainOriginKHR> MaybeDomainOrigin;
+typedef tcu::Maybe<VkTessellationDomainOrigin> MaybeDomainOrigin;
 
 class WindingTest : public TestCase
 {
@@ -401,15 +404,12 @@ WindingTestInstance::WindingTestInstance (Context&					context,
 
 void WindingTestInstance::requireExtension (const char* name) const
 {
-	if (!de::contains(m_context.getDeviceExtensions().begin(), m_context.getDeviceExtensions().end(), name))
+	if(!isDeviceExtensionSupported(m_context.getUsedApiVersion(), m_context.getDeviceExtensions(), name))
 		TCU_THROW(NotSupportedError, (std::string(name) + " is not supported").c_str());
 }
 
 tcu::TestStatus WindingTestInstance::iterate (void)
 {
-	if (m_yFlip && !de::contains(m_context.getDeviceExtensions().begin(), m_context.getDeviceExtensions().end(), "VK_KHR_maintenance1"))
-		TCU_THROW(NotSupportedError, "Extension VK_KHR_maintenance1 not supported");
-
 	const DeviceInterface&	vk					= m_context.getDeviceInterface();
 	const VkDevice			device				= m_context.getDevice();
 	const VkQueue			queue				= m_context.getUniversalQueue();
@@ -501,17 +501,14 @@ tcu::TestStatus WindingTestInstance::iterate (void)
 				currentLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				*colorAttachmentImage, colorImageSubresourceRange);
 
-			vk.cmdPipelineBarrier(*cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0u,
+			vk.cmdPipelineBarrier(*cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0u,
 				0u, DE_NULL, 0u, DE_NULL, 1u, &colorAttachmentLayoutBarrier);
 		}
 
 		// Begin render pass
 		{
-			const VkRect2D renderArea = {
-				makeOffset2D(0, 0),
-				makeExtent2D(renderSize.x(), renderSize.y()),
-			};
-			const tcu::Vec4 clearColor = tcu::RGBA::red().toVec();
+			const VkRect2D	renderArea	= makeRect2D(renderSize);
+			const tcu::Vec4	clearColor	= tcu::RGBA::red().toVec();
 
 			beginRenderPass(vk, *cmdBuffer, *renderPass, *framebuffer, renderArea, clearColor);
 		}
@@ -527,11 +524,7 @@ tcu::TestStatus WindingTestInstance::iterate (void)
 		};
 		vk.cmdSetViewport(*cmdBuffer, 0, 1, &viewport);
 
-		const VkRect2D scissor =
-		{
-			makeOffset2D(0, 0),
-			makeExtent2D(renderSize.x(), renderSize.y()),
-		};
+		const VkRect2D scissor = makeRect2D(renderSize);
 		vk.cmdSetScissor(*cmdBuffer, 0, 1, &scissor);
 
 		vk.cmdBindPipeline(*cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, testCases[caseNdx].pipeline);
@@ -541,26 +534,7 @@ tcu::TestStatus WindingTestInstance::iterate (void)
 		endRenderPass(vk, *cmdBuffer);
 
 		// Copy render result to a host-visible buffer
-		{
-			const VkImageMemoryBarrier colorAttachmentPreCopyBarrier = makeImageMemoryBarrier(
-				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-				*colorAttachmentImage, colorImageSubresourceRange);
-
-			vk.cmdPipelineBarrier(*cmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u,
-				0u, DE_NULL, 0u, DE_NULL, 1u, &colorAttachmentPreCopyBarrier);
-		}
-		{
-			const VkBufferImageCopy copyRegion = makeBufferImageCopy(makeExtent3D(renderSize.x(), renderSize.y(), 1), makeImageSubresourceLayers(VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u));
-			vk.cmdCopyImageToBuffer(*cmdBuffer, *colorAttachmentImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, *colorBuffer, 1u, &copyRegion);
-		}
-		{
-			const VkBufferMemoryBarrier postCopyBarrier = makeBufferMemoryBarrier(
-				VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT, *colorBuffer, 0ull, colorBufferSizeBytes);
-
-			vk.cmdPipelineBarrier(*cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0u,
-				0u, DE_NULL, 1u, &postCopyBarrier, 0u, DE_NULL);
-		}
+		copyImageToBuffer(vk, *cmdBuffer, *colorAttachmentImage, *colorBuffer, renderSize);
 
 		endCommandBuffer(vk, *cmdBuffer);
 		submitCommandsAndWait(vk, device, queue, *cmdBuffer);
@@ -577,7 +551,7 @@ tcu::TestStatus WindingTestInstance::iterate (void)
 			success = verifyResultImage(log,
 										imagePixelAccess,
 										m_primitiveType,
-										!m_domainOrigin ? VK_TESSELLATION_DOMAIN_ORIGIN_UPPER_LEFT_KHR : *m_domainOrigin,
+										!m_domainOrigin ? VK_TESSELLATION_DOMAIN_ORIGIN_UPPER_LEFT : *m_domainOrigin,
 										m_winding,
 										m_yFlip,
 										frontFaceWinding) && success;
@@ -594,7 +568,7 @@ TestInstance* WindingTest::createInstance (Context& context) const
 	return new WindingTestInstance(context, m_primitiveType, m_domainOrigin, m_winding, m_yFlip);
 }
 
-void populateWindingGroup (tcu::TestCaseGroup* group, tcu::Maybe<VkTessellationDomainOriginKHR> domainOrigin)
+void populateWindingGroup (tcu::TestCaseGroup* group, tcu::Maybe<VkTessellationDomainOrigin> domainOrigin)
 {
 	static const TessPrimitiveType primitivesNoIsolines[] =
 	{
@@ -624,9 +598,9 @@ tcu::TestCaseGroup* createWindingTests (tcu::TestContext& testCtx)
 {
 	de::MovePtr<tcu::TestCaseGroup> group (new tcu::TestCaseGroup(testCtx, "winding", "Test the cw and ccw input layout qualifiers"));
 
-	addTestGroup(group.get(), "default_domain",		"No tessellation domain specified",	populateWindingGroup,	tcu::nothing<VkTessellationDomainOriginKHR>());
-	addTestGroup(group.get(), "lower_left_domain",	"Lower left tessellation domain",	populateWindingGroup,	tcu::just(VK_TESSELLATION_DOMAIN_ORIGIN_LOWER_LEFT_KHR));
-	addTestGroup(group.get(), "upper_left_domain",	"Upper left tessellation domain",	populateWindingGroup,	tcu::just(VK_TESSELLATION_DOMAIN_ORIGIN_UPPER_LEFT_KHR));
+	addTestGroup(group.get(), "default_domain",		"No tessellation domain specified",	populateWindingGroup,	tcu::nothing<VkTessellationDomainOrigin>());
+	addTestGroup(group.get(), "lower_left_domain",	"Lower left tessellation domain",	populateWindingGroup,	tcu::just(VK_TESSELLATION_DOMAIN_ORIGIN_LOWER_LEFT));
+	addTestGroup(group.get(), "upper_left_domain",	"Upper left tessellation domain",	populateWindingGroup,	tcu::just(VK_TESSELLATION_DOMAIN_ORIGIN_UPPER_LEFT));
 
 	return group.release();
 }

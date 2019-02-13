@@ -42,8 +42,11 @@
 #include "es31cTextureGatherTests.hpp"
 #include "es31cTextureStorageMultisampleTests.hpp"
 #include "es31cVertexAttribBindingTests.hpp"
+#include "glcAggressiveShaderOptimizationsTests.hpp"
 #include "glcBlendEquationAdvancedTests.hpp"
 #include "glcInfoTests.hpp"
+#include "glcInternalformatTests.hpp"
+#include "glcLayoutLocationTests.hpp"
 #include "glcPolygonOffsetClampTests.hpp"
 #include "glcSampleVariablesTests.hpp"
 #include "glcShaderConstExprTests.hpp"
@@ -158,6 +161,8 @@ public:
 	void init(void)
 	{
 		addChild(new deqp::ShaderNegativeTests(m_context, glu::GLSL_VERSION_310_ES));
+		addChild(new glcts::AggressiveShaderOptimizationsTests(m_context));
+		addChild(new glcts::LayoutLocationTests(m_context));
 	}
 };
 
@@ -195,6 +200,7 @@ void ES31TestPackage::init(void)
 		coreGroup->addChild(new glcts::ArrayOfArraysTestGroup(getContext()));
 		coreGroup->addChild(new glcts::PolygonOffsetClamp(getContext()));
 		coreGroup->addChild(new glcts::ShaderGroupVote(getContext()));
+		coreGroup->addChild(new glcts::InternalformatTests(getContext()));
 
 		glcts::ExtParameters extParams(glu::GLSL_VERSION_310_ES, glcts::EXTENSIONTYPE_OES);
 		coreGroup->addChild(new glcts::GeometryShaderTests(getContext(), extParams));

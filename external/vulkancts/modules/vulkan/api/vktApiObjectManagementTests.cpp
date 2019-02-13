@@ -34,6 +34,7 @@
 #include "vkPlatform.hpp"
 #include "vkStrUtil.hpp"
 #include "vkAllocationCallbackUtil.hpp"
+#include "vkObjUtil.hpp"
 
 #include "tcuVector.hpp"
 #include "tcuResultCollector.hpp"
@@ -49,6 +50,8 @@
 #include "deInt32.h"
 
 #include <limits>
+
+#define VK_DESCRIPTOR_TYPE_LAST (VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1)
 
 namespace vkt
 {
@@ -230,6 +233,8 @@ deUint32 getDefaultTestThreadCount (void)
 struct Environment
 {
 	const PlatformInterface&		vkp;
+	deUint32						apiVersion;
+	VkInstance						instance;
 	const DeviceInterface&			vkd;
 	VkDevice						device;
 	deUint32						queueFamilyIndex;
@@ -239,6 +244,8 @@ struct Environment
 
 	Environment (Context& context, deUint32 maxResourceConsumers_)
 		: vkp					(context.getPlatformInterface())
+		, apiVersion			(context.getUsedApiVersion())
+		, instance				(context.getInstance())
 		, vkd					(context.getDeviceInterface())
 		, device				(context.getDevice())
 		, queueFamilyIndex		(context.getUniversalQueueFamilyIndex())
@@ -249,6 +256,8 @@ struct Environment
 	}
 
 	Environment (const PlatformInterface&		vkp_,
+				 deUint32						apiVersion_,
+				 VkInstance						instance_,
 				 const DeviceInterface&			vkd_,
 				 VkDevice						device_,
 				 deUint32						queueFamilyIndex_,
@@ -256,6 +265,8 @@ struct Environment
 				 const VkAllocationCallbacks*	allocationCallbacks_,
 				 deUint32						maxResourceConsumers_)
 		: vkp					(vkp_)
+		, apiVersion			(apiVersion_)
+		, instance				(instance_)
 		, vkd					(vkd_)
 		, device				(device_)
 		, queueFamilyIndex		(queueFamilyIndex_)
@@ -302,9 +313,9 @@ T alignToPowerOfTwo (T value, T align)
 	return (value + align - T(1)) & ~(align - T(1));
 }
 
-inline bool hasDeviceExtension (Context& context, const string& name)
+inline bool hasDeviceExtension (Context& context, const string name)
 {
-	return de::contains(context.getDeviceExtensions().begin(), context.getDeviceExtensions().end(), name);
+	return isDeviceExtensionSupported(context.getUsedApiVersion(), context.getDeviceExtensions(), name);
 }
 
 VkDeviceSize getPageTableSize (const PlatformMemoryLimits& limits, VkDeviceSize allocationSize)
@@ -338,6 +349,8 @@ size_t computeSystemMemoryUsage (Context& context, const typename Object::Parame
 {
 	AllocationCallbackRecorder			allocRecorder		(getSystemAllocator());
 	const Environment					env					(context.getPlatformInterface(),
+															 context.getUsedApiVersion(),
+															 context.getInstance(),
 															 context.getDeviceInterface(),
 															 context.getDevice(),
 															 context.getUniversalQueueFamilyIndex(),
@@ -429,7 +442,13 @@ struct Instance
 
 	struct Parameters
 	{
+		const vector<string>	instanceExtensions;
+
 		Parameters (void) {}
+
+		Parameters (vector<string>& extensions)
+			: instanceExtensions	(extensions)
+		{}
 	};
 
 	struct Resources
@@ -442,8 +461,19 @@ struct Instance
 		return getSafeObjectCount<Instance>(context, params, MAX_CONCURRENT_INSTANCES);
 	}
 
-	static Move<VkInstance> create (const Environment& env, const Resources&, const Parameters&)
+	static Move<VkInstance> create (const Environment& env, const Resources&, const Parameters& params)
 	{
+		vector<const char*>					extensionNamePtrs;
+		const vector<VkExtensionProperties>	instanceExts = enumerateInstanceExtensionProperties(env.vkp, DE_NULL);
+		for (size_t extensionID = 0; extensionID < params.instanceExtensions.size(); extensionID++)
+		{
+			if (!isInstanceExtensionSupported(env.apiVersion, instanceExts, RequiredExtension(params.instanceExtensions[extensionID])))
+				TCU_THROW(NotSupportedError, (params.instanceExtensions[extensionID] + " is not supported").c_str());
+
+			if (!isCoreInstanceExtension(env.apiVersion, params.instanceExtensions[extensionID]))
+				extensionNamePtrs.push_back(params.instanceExtensions[extensionID].c_str());
+		}
+
 		const VkApplicationInfo		appInfo			=
 		{
 			VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -452,18 +482,19 @@ struct Instance
 			0u,									// applicationVersion
 			DE_NULL,							// pEngineName
 			0u,									// engineVersion
-			VK_MAKE_VERSION(1,0,0)
+			env.apiVersion
 		};
+
 		const VkInstanceCreateInfo	instanceInfo	=
 		{
 			VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 			DE_NULL,
 			(VkInstanceCreateFlags)0,
 			&appInfo,
-			0u,									// enabledLayerNameCount
-			DE_NULL,							// ppEnabledLayerNames
-			0u,									// enabledExtensionNameCount
-			DE_NULL,							// ppEnabledExtensionNames
+			0u,																// enabledLayerNameCount
+			DE_NULL,														// ppEnabledLayerNames
+			(deUint32)extensionNamePtrs.size(),								// enabledExtensionNameCount
+			extensionNamePtrs.empty() ? DE_NULL : &extensionNamePtrs[0],	// ppEnabledExtensionNames
 		};
 
 		return createInstance(env.vkp, &instanceInfo, env.allocationCallbacks);
@@ -560,7 +591,120 @@ struct Device
 			DE_NULL,								// pEnabledFeatures
 		};
 
-		return createDevice(res.vki, res.physicalDevice, &deviceInfo, env.allocationCallbacks);
+		return createDevice(env.vkp, env.instance, res.vki, res.physicalDevice, &deviceInfo, env.allocationCallbacks);
+	}
+};
+
+
+struct DeviceGroup
+{
+	typedef VkDevice Type;
+
+	struct Parameters
+	{
+		deUint32		deviceGroupIndex;
+		deUint32		deviceIndex;
+		VkQueueFlags	queueFlags;
+
+		Parameters (deUint32 deviceGroupIndex_, deUint32 deviceIndex_, VkQueueFlags queueFlags_)
+			: deviceGroupIndex	(deviceGroupIndex_)
+			, deviceIndex		(deviceIndex_)
+			, queueFlags		(queueFlags_)
+		{}
+	};
+
+	struct Resources
+	{
+		vector<string>				extensions;
+		Dependency<Instance>		instance;
+		InstanceDriver				vki;
+		vector<VkPhysicalDevice>	physicalDevices;
+		deUint32					physicalDeviceCount;
+		deUint32					queueFamilyIndex;
+
+		Resources (const Environment& env, const Parameters& params)
+			: extensions			(1, "VK_KHR_device_group_creation")
+			, instance				(env, Instance::Parameters(extensions))
+			, vki					(env.vkp, *instance.object)
+			, physicalDeviceCount	(0)
+			, queueFamilyIndex		(~0u)
+		{
+			{
+				const vector<VkPhysicalDeviceGroupProperties> devGroupProperties = enumeratePhysicalDeviceGroups(vki, *instance.object);
+
+				if (devGroupProperties.size() <= (size_t)params.deviceGroupIndex)
+					TCU_THROW(NotSupportedError, "Device Group not found");
+
+				physicalDeviceCount	= devGroupProperties[params.deviceGroupIndex].physicalDeviceCount;
+				physicalDevices.resize(physicalDeviceCount);
+
+				for (deUint32 physicalDeviceIdx = 0; physicalDeviceIdx < physicalDeviceCount; physicalDeviceIdx++)
+					physicalDevices[physicalDeviceIdx] = devGroupProperties[params.deviceGroupIndex].physicalDevices[physicalDeviceIdx];
+			}
+
+			{
+				const vector<VkQueueFamilyProperties>	queueProps = getPhysicalDeviceQueueFamilyProperties(vki, physicalDevices[params.deviceIndex]);
+				bool									foundMatching = false;
+
+				for (size_t curQueueNdx = 0; curQueueNdx < queueProps.size(); curQueueNdx++)
+				{
+					if ((queueProps[curQueueNdx].queueFlags & params.queueFlags) == params.queueFlags)
+					{
+						queueFamilyIndex = (deUint32)curQueueNdx;
+						foundMatching = true;
+					}
+				}
+
+				if (!foundMatching)
+					TCU_THROW(NotSupportedError, "Matching queue not found");
+			}
+		}
+	};
+
+	static deUint32 getMaxConcurrent (Context& context, const Parameters& params)
+	{
+		return getSafeObjectCount<DeviceGroup>(context, params, MAX_CONCURRENT_DEVICES);
+	}
+
+	static Move<VkDevice> create (const Environment& env, const Resources& res, const Parameters& params)
+	{
+		const float	queuePriority = 1.0;
+
+		const VkDeviceQueueCreateInfo	queues[] =
+		{
+			{
+				VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+				DE_NULL,							// pNext
+				(VkDeviceQueueCreateFlags)0,		// flags
+				res.queueFamilyIndex,				// queueFamilyIndex
+				1u,									// queueCount
+				&queuePriority,						// pQueuePriorities
+			}
+		};
+
+		const VkDeviceGroupDeviceCreateInfo deviceGroupInfo =
+		{
+			VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO,	//stype
+			DE_NULL,											//pNext
+			res.physicalDeviceCount,							//physicalDeviceCount
+			res.physicalDevices.data()							//physicalDevices
+		};
+
+		const VkDeviceCreateInfo			deviceGroupCreateInfo =
+		{
+			VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+			&deviceGroupInfo,
+			(VkDeviceCreateFlags)0,
+			DE_LENGTH_OF_ARRAY(queues),
+			queues,
+			0u,													// enabledLayerNameCount
+			DE_NULL,											// ppEnabledLayerNames
+			0u,													// enabledExtensionNameCount
+			DE_NULL,											// ppEnabledExtensionNames
+			DE_NULL,											// pEnabledFeatures
+		};
+
+		return createDevice(env.vkp, env.instance, res.vki, res.physicalDevices[params.deviceIndex], &deviceGroupCreateInfo, env.allocationCallbacks);
 	}
 };
 
@@ -1429,72 +1573,13 @@ struct RenderPass
 
 	static Move<VkRenderPass> create (const Environment& env, const Resources&, const Parameters&)
 	{
-		const VkAttachmentDescription	attachments[]		=
-		{
-			{
-				(VkAttachmentDescriptionFlags)0,
-				VK_FORMAT_R8G8B8A8_UNORM,
-				VK_SAMPLE_COUNT_1_BIT,
-				VK_ATTACHMENT_LOAD_OP_CLEAR,
-				VK_ATTACHMENT_STORE_OP_STORE,
-				VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-				VK_ATTACHMENT_STORE_OP_DONT_CARE,
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			},
-			{
-				(VkAttachmentDescriptionFlags)0,
-				VK_FORMAT_D16_UNORM,
-				VK_SAMPLE_COUNT_1_BIT,
-				VK_ATTACHMENT_LOAD_OP_CLEAR,
-				VK_ATTACHMENT_STORE_OP_DONT_CARE,
-				VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-				VK_ATTACHMENT_STORE_OP_DONT_CARE,
-				VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-				VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-			}
-		};
-		const VkAttachmentReference		colorAttachments[]	=
-		{
-			{
-				0u,											// attachment
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			}
-		};
-		const VkAttachmentReference		dsAttachment		=
-		{
-			1u,											// attachment
-			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-		};
-		const VkSubpassDescription		subpasses[]			=
-		{
-			{
-				(VkSubpassDescriptionFlags)0,
-				VK_PIPELINE_BIND_POINT_GRAPHICS,
-				0u,											// inputAttachmentCount
-				DE_NULL,									// pInputAttachments
-				DE_LENGTH_OF_ARRAY(colorAttachments),
-				colorAttachments,
-				DE_NULL,									// pResolveAttachments
-				&dsAttachment,
-				0u,											// preserveAttachmentCount
-				DE_NULL,									// pPreserveAttachments
-			}
-		};
-		const VkRenderPassCreateInfo	renderPassInfo		=
-		{
-			VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-			DE_NULL,
-			(VkRenderPassCreateFlags)0,
-			DE_LENGTH_OF_ARRAY(attachments),
-			attachments,
-			DE_LENGTH_OF_ARRAY(subpasses),
-			subpasses,
-			0u,												// dependencyCount
-			DE_NULL											// pDependencies
-		};
-
-		return createRenderPass(env.vkd, env.device, &renderPassInfo, env.allocationCallbacks);
+		return makeRenderPass(env.vkd, env.device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D16_UNORM,
+			VK_ATTACHMENT_LOAD_OP_CLEAR,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			env.allocationCallbacks);
 	}
 };
 
@@ -1599,30 +1684,25 @@ struct GraphicsPipeline
 			VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
 			VK_FALSE								// primitiveRestartEnable
 		};
-		const VkViewport								viewports[]			=
-		{
-			{ 0.0f, 0.0f, 64.f, 64.f, 0.0f, 1.0f }
-		};
-		const VkRect2D									scissors[]			=
-		{
-			{ { 0, 0 }, { 64, 64 } }
-		};
+		const VkViewport								viewport			= makeViewport(tcu::UVec2(64));
+		const VkRect2D									scissor				= makeRect2D(tcu::UVec2(64));
+
 		const VkPipelineViewportStateCreateInfo			viewportState		=
 		{
 			VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 			DE_NULL,
 			(VkPipelineViewportStateCreateFlags)0,
-			DE_LENGTH_OF_ARRAY(viewports),
-			viewports,
-			DE_LENGTH_OF_ARRAY(scissors),
-			scissors,
+			1u,
+			&viewport,
+			1u,
+			&scissor,
 		};
 		const VkPipelineRasterizationStateCreateInfo	rasterState			=
 		{
 			VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 			DE_NULL,
 			(VkPipelineRasterizationStateCreateFlags)0,
-			VK_TRUE,								// depthClampEnable
+			VK_FALSE,								// depthClampEnable
 			VK_FALSE,								// rasterizerDiscardEnable
 			VK_POLYGON_MODE_FILL,
 			VK_CULL_MODE_BACK_BIT,
@@ -2274,6 +2354,7 @@ template<typename Object>	int getCreateCount				(void) { return 100;	}
 // Creating VkDevice and VkInstance can take significantly longer than other object types
 template<>					int getCreateCount<Instance>	(void) { return 20;		}
 template<>					int getCreateCount<Device>		(void) { return 20;		}
+template<>					int getCreateCount<DeviceGroup>	(void) { return 20;		}
 
 template<typename Object>
 class CreateThread : public ThreadGroupThread
@@ -2359,8 +2440,8 @@ struct EnvClone
 	EnvClone (const Environment& parent, const Device::Parameters& deviceParams, deUint32 maxResourceConsumers)
 		: deviceRes	(parent, deviceParams)
 		, device	(Device::create(parent, deviceRes, deviceParams))
-		, vkd		(deviceRes.vki, *device)
-		, env		(parent.vkp, vkd, *device, deviceRes.queueFamilyIndex, parent.programBinaries, parent.allocationCallbacks, maxResourceConsumers)
+		, vkd		(parent.vkp, parent.instance, *device)
+		, env		(parent.vkp, parent.apiVersion, parent.instance, vkd, *device, deviceRes.queueFamilyIndex, parent.programBinaries, parent.allocationCallbacks, maxResourceConsumers)
 	{
 	}
 };
@@ -2411,6 +2492,8 @@ tcu::TestStatus createSingleAllocCallbacksTest (Context& context, typename Objec
 
 	// Root environment still uses default instance and device, created without callbacks
 	const Environment					rootEnv			(context.getPlatformInterface(),
+														 context.getUsedApiVersion(),
+														 context.getInstance(),
 														 context.getDeviceInterface(),
 														 context.getDevice(),
 														 context.getUniversalQueueFamilyIndex(),
@@ -2426,6 +2509,8 @@ tcu::TestStatus createSingleAllocCallbacksTest (Context& context, typename Objec
 		// Supply a separate callback recorder just for object construction
 		AllocationCallbackRecorder			objCallbacks(getSystemAllocator(), 128);
 		const Environment					objEnv		(resEnv.env.vkp,
+														 resEnv.env.apiVersion,
+														 resEnv.env.instance,
 														 resEnv.env.vkd,
 														 resEnv.env.device,
 														 resEnv.env.queueFamilyIndex,
@@ -2452,14 +2537,17 @@ tcu::TestStatus createSingleAllocCallbacksTest (Context& context, typename Objec
 	return tcu::TestStatus::pass("Ok");
 }
 
-template<typename Object>	deUint32	getOomIterLimit			(void) { return 1024;	}
-template<>					deUint32	getOomIterLimit<Device>	(void) { return 20;		}
+template<typename Object>	deUint32	getOomIterLimit					(void) { return 1024;	}
+template<>					deUint32	getOomIterLimit<Device>         (void) { return 20;		}
+template<>					deUint32	getOomIterLimit<DeviceGroup>	(void) { return 20;		}
 
 template<typename Object>
 tcu::TestStatus allocCallbackFailTest (Context& context, typename Object::Parameters params)
 {
 	AllocationCallbackRecorder			resCallbacks		(getSystemAllocator(), 128);
 	const Environment					rootEnv				(context.getPlatformInterface(),
+															 context.getUsedApiVersion(),
+															 context.getInstance(),
 															 context.getDeviceInterface(),
 															 context.getDevice(),
 															 context.getUniversalQueueFamilyIndex(),
@@ -2482,6 +2570,8 @@ tcu::TestStatus allocCallbackFailTest (Context& context, typename Object::Parame
 															 numPassingAllocs);
 			AllocationCallbackRecorder			recorder	(objAllocator.getCallbacks(), 128);
 			const Environment					objEnv		(resEnv.env.vkp,
+															 resEnv.env.apiVersion,
+															 resEnv.env.instance,
 															 resEnv.env.vkd,
 															 resEnv.env.device,
 															 resEnv.env.queueFamilyIndex,
@@ -2569,6 +2659,8 @@ tcu::TestStatus allocCallbackFailMultipleObjectsTest (Context& context, typename
 			DeterministicFailAllocator			objAllocator(getSystemAllocator(), DeterministicFailAllocator::MODE_DO_NOT_COUNT, 0);
 			AllocationCallbackRecorder			recorder	(objAllocator.getCallbacks(), 128);
 			const Environment					objEnv		(context.getPlatformInterface(),
+															 context.getUsedApiVersion(),
+															 context.getInstance(),
 															 context.getDeviceInterface(),
 															 context.getDevice(),
 															 context.getUniversalQueueFamilyIndex(),
@@ -2651,6 +2743,7 @@ struct CaseDescriptions
 {
 	CaseDescription<Instance>				instance;
 	CaseDescription<Device>					device;
+	CaseDescription<DeviceGroup>			deviceGroup;
 	CaseDescription<DeviceMemory>			deviceMemory;
 	CaseDescription<Buffer>					buffer;
 	CaseDescription<BufferView>				bufferView;
@@ -2695,6 +2788,7 @@ tcu::TestCaseGroup* createGroup (tcu::TestContext& testCtx, const char* name, co
 
 	addCases			(group, cases.instance);
 	addCases			(group, cases.device);
+	addCases			(group, cases.deviceGroup);
 	addCases			(group, cases.deviceMemory);
 	addCases			(group, cases.buffer);
 	addCases			(group, cases.bufferView);
@@ -2746,9 +2840,14 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 		{ "instance",					Instance::Parameters() },
 	};
 	// \note Device index may change - must not be static
+
 	const NamedParameters<Device>				s_deviceCases[]					=
 	{
 		{ "device",						Device::Parameters(testCtx.getCommandLine().getVKDeviceId()-1u, VK_QUEUE_GRAPHICS_BIT)	},
+	};
+	const NamedParameters<DeviceGroup>					s_deviceGroupCases[]			=
+	{
+		{ "device_group",				DeviceGroup::Parameters(testCtx.getCommandLine().getVKDeviceGroupId() - 1u, testCtx.getCommandLine().getVKDeviceId() - 1u, VK_QUEUE_GRAPHICS_BIT) },
 	};
 	static const NamedParameters<DeviceMemory>			s_deviceMemCases[]				=
 	{
@@ -2861,6 +2960,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		CASE_DESC(createSingleTest	<Instance>,					s_instanceCases),
 		CASE_DESC(createSingleTest	<Device>,					s_deviceCases),
+		CASE_DESC(createSingleTest	<DeviceGroup>,				s_deviceGroupCases),
 		CASE_DESC(createSingleTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(createSingleTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(createSingleTest	<BufferView>,				s_bufferViewCases),
@@ -2890,6 +2990,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		CASE_DESC(createMultipleUniqueResourcesTest	<Instance>,					s_instanceCases),
 		CASE_DESC(createMultipleUniqueResourcesTest	<Device>,					s_deviceCases),
+		CASE_DESC(createMultipleUniqueResourcesTest	<DeviceGroup>,				s_deviceGroupCases),
 		CASE_DESC(createMultipleUniqueResourcesTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(createMultipleUniqueResourcesTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(createMultipleUniqueResourcesTest	<BufferView>,				s_bufferViewCases),
@@ -2919,6 +3020,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		EMPTY_CASE_DESC(Instance), // No resources used
 		CASE_DESC(createMultipleSharedResourcesTest	<Device>,					s_deviceCases),
+		CASE_DESC(createMultipleSharedResourcesTest	<DeviceGroup>,				s_deviceGroupCases),
 		CASE_DESC(createMultipleSharedResourcesTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(createMultipleSharedResourcesTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(createMultipleSharedResourcesTest	<BufferView>,				s_bufferViewCases),
@@ -2948,6 +3050,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		CASE_DESC(createMaxConcurrentTest	<Instance>,					s_instanceCases),
 		CASE_DESC(createMaxConcurrentTest	<Device>,					s_deviceCases),
+		CASE_DESC(createMaxConcurrentTest	<DeviceGroup>,				s_deviceGroupCases),
 		CASE_DESC(createMaxConcurrentTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(createMaxConcurrentTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(createMaxConcurrentTest	<BufferView>,				s_bufferViewCases),
@@ -2975,8 +3078,9 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 
 	const CaseDescriptions	s_multithreadedCreatePerThreadDeviceGroup	=
 	{
-		EMPTY_CASE_DESC(Instance),	// Does not make sense
-		EMPTY_CASE_DESC(Device),	// Does not make sense
+		EMPTY_CASE_DESC(Instance),		// Does not make sense
+		EMPTY_CASE_DESC(Device),		// Does not make sense
+		EMPTY_CASE_DESC(DeviceGroup),	// Does not make sense
 		CASE_DESC(multithreadedCreatePerThreadDeviceTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(multithreadedCreatePerThreadDeviceTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(multithreadedCreatePerThreadDeviceTest	<BufferView>,				s_bufferViewCases),
@@ -3006,6 +3110,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		CASE_DESC(multithreadedCreatePerThreadResourcesTest	<Instance>,					s_instanceCases),
 		CASE_DESC(multithreadedCreatePerThreadResourcesTest	<Device>,					s_deviceCases),
+		CASE_DESC(multithreadedCreatePerThreadResourcesTest	<DeviceGroup>,				s_deviceGroupCases),
 		CASE_DESC(multithreadedCreatePerThreadResourcesTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(multithreadedCreatePerThreadResourcesTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(multithreadedCreatePerThreadResourcesTest	<BufferView>,				s_bufferViewCases),
@@ -3035,6 +3140,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		EMPTY_CASE_DESC(Instance),
 		CASE_DESC(multithreadedCreateSharedResourcesTest	<Device>,					s_deviceCases),
+		CASE_DESC(multithreadedCreateSharedResourcesTest	<DeviceGroup>,				s_deviceGroupCases),
 		CASE_DESC(multithreadedCreateSharedResourcesTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(multithreadedCreateSharedResourcesTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(multithreadedCreateSharedResourcesTest	<BufferView>,				s_bufferViewCases),
@@ -3064,6 +3170,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		CASE_DESC(createSingleAllocCallbacksTest	<Instance>,					s_instanceCases),
 		CASE_DESC(createSingleAllocCallbacksTest	<Device>,					s_deviceCases),
+		CASE_DESC(createSingleAllocCallbacksTest	<DeviceGroup>,				s_deviceGroupCases),
 		CASE_DESC(createSingleAllocCallbacksTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(createSingleAllocCallbacksTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(createSingleAllocCallbacksTest	<BufferView>,				s_bufferViewCases),
@@ -3094,6 +3201,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		CASE_DESC(allocCallbackFailTest	<Instance>,					s_instanceCases),
 		CASE_DESC(allocCallbackFailTest	<Device>,					s_deviceCases),
+		CASE_DESC(allocCallbackFailTest	<DeviceGroup>,				s_deviceGroupCases),
 		CASE_DESC(allocCallbackFailTest	<DeviceMemory>,				s_deviceMemCases),
 		CASE_DESC(allocCallbackFailTest	<Buffer>,					s_bufferCases),
 		CASE_DESC(allocCallbackFailTest	<BufferView>,				s_bufferViewCases),
@@ -3124,6 +3232,7 @@ tcu::TestCaseGroup* createObjectManagementTests (tcu::TestContext& testCtx)
 	{
 		EMPTY_CASE_DESC(Instance),			// most objects can be created one at a time only
 		EMPTY_CASE_DESC(Device),
+		EMPTY_CASE_DESC(DeviceGroup),
 		EMPTY_CASE_DESC(DeviceMemory),
 		EMPTY_CASE_DESC(Buffer),
 		EMPTY_CASE_DESC(BufferView),

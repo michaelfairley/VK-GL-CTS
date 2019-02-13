@@ -37,13 +37,13 @@ using std::vector;
 using std::string;
 
 Move<VkInstance> createDefaultInstance (const PlatformInterface&		vkPlatform,
+										deUint32						apiVersion,
 										const vector<string>&			enabledLayers,
 										const vector<string>&			enabledExtensions,
 										const VkAllocationCallbacks*	pAllocator)
 {
 	vector<const char*>		layerNamePtrs		(enabledLayers.size());
 	vector<const char*>		extensionNamePtrs	(enabledExtensions.size());
-	const deUint32			apiVersion			= pack(ApiVersion(1, 0, 0));
 
 	const struct VkApplicationInfo		appInfo			=
 	{
@@ -76,22 +76,76 @@ Move<VkInstance> createDefaultInstance (const PlatformInterface&		vkPlatform,
 	return createInstance(vkPlatform, &instanceInfo, pAllocator);
 }
 
-Move<VkInstance> createDefaultInstance (const PlatformInterface& vkPlatform)
+Move<VkInstance> createDefaultInstance (const PlatformInterface& vkPlatform, deUint32 apiVersion)
 {
-	return createDefaultInstance(vkPlatform, vector<string>(), vector<string>(), DE_NULL);
+	return createDefaultInstance(vkPlatform, apiVersion, vector<string>(), vector<string>(), DE_NULL);
 }
 
-VkPhysicalDevice chooseDevice (const InstanceInterface& vkInstance, VkInstance instance, const tcu::CommandLine& cmdLine)
+Move<VkInstance> createInstanceWithExtensions (const PlatformInterface&			vkp,
+											   const deUint32					version,
+											   const std::vector<std::string>	requiredExtensions)
 {
-	const vector<VkPhysicalDevice>	devices	= enumeratePhysicalDevices(vkInstance, instance);
+	std::vector<std::string>					extensionPtrs;
+	const std::vector<VkExtensionProperties>	availableExtensions	= enumerateInstanceExtensionProperties(vkp, DE_NULL);
+	for (size_t extensionID = 0; extensionID < requiredExtensions.size(); extensionID++)
+	{
+		if (!isInstanceExtensionSupported(version, availableExtensions, RequiredExtension(requiredExtensions[extensionID])))
+			TCU_THROW(NotSupportedError, (requiredExtensions[extensionID] + " is not supported").c_str());
+
+		if (!isCoreInstanceExtension(version, requiredExtensions[extensionID]))
+			extensionPtrs.push_back(requiredExtensions[extensionID]);
+	}
+
+	return createDefaultInstance(vkp, version, std::vector<std::string>() /* layers */, extensionPtrs, DE_NULL);
+}
+
+Move<VkInstance> createInstanceWithExtension (const PlatformInterface&	vkp,
+											  const deUint32			version,
+											  const std::string			requiredExtension)
+{
+	return createInstanceWithExtensions(vkp, version, std::vector<std::string>(1, requiredExtension));
+}
+
+deUint32 chooseDeviceIndex (const InstanceInterface& vkInstance, const VkInstance instance, const tcu::CommandLine& cmdLine)
+{
+	const vector<VkPhysicalDevice>			devices					= enumeratePhysicalDevices(vkInstance, instance);
 
 	if (devices.empty())
 		TCU_THROW(NotSupportedError, "No Vulkan devices available");
 
-	if (!de::inBounds(cmdLine.getVKDeviceId(), 1, (int)devices.size()+1))
+	const deUint32							deviceIdFromCmdLine		= cmdLine.getVKDeviceId();
+	if (!de::inBounds(deviceIdFromCmdLine, 0u, static_cast<deUint32>(devices.size() + 1)))
 		TCU_THROW(InternalError, "Invalid --deqp-vk-device-id");
 
-	return devices[(size_t)(cmdLine.getVKDeviceId()-1)];
+	if (deviceIdFromCmdLine > 0)
+		return deviceIdFromCmdLine - 1u;
+
+	deUint32								maxReportedApiVersion	= 0u;
+	deUint32								ndxOfMaximumVersion		= 0u;
+
+	for (deUint32 deviceNdx = 0u; deviceNdx < devices.size(); ++deviceNdx)
+	{
+		const VkPhysicalDeviceProperties	props					= getPhysicalDeviceProperties(vkInstance, devices[deviceNdx]);
+
+		if (props.apiVersion > maxReportedApiVersion)
+		{
+			maxReportedApiVersion = props.apiVersion;
+			ndxOfMaximumVersion = deviceNdx;
+		}
+	}
+
+	return ndxOfMaximumVersion;
+}
+
+VkPhysicalDevice chooseDevice (const InstanceInterface& vkInstance, const VkInstance instance, const tcu::CommandLine& cmdLine)
+{
+	const vector<VkPhysicalDevice>	devices		= enumeratePhysicalDevices(vkInstance, instance);
+
+	if (devices.empty())
+		TCU_THROW(NotSupportedError, "No Vulkan devices available");
+
+	const size_t					deviceId	= chooseDeviceIndex(vkInstance, instance, cmdLine);
+	return devices[deviceId];
 }
 
 } // vk

@@ -175,12 +175,65 @@ class SourcePackage (Source):
 		if self.postExtract != None:
 			self.postExtract(dstPath)
 
+class SourceFile (Source):
+	def __init__(self, url, filename, checksum, baseDir, extractDir = "src"):
+		Source.__init__(self, baseDir, extractDir)
+		self.url			= url
+		self.filename		= filename
+		self.checksum		= checksum
+
+	def update (self, cmdProtocol = None):
+		if not self.isFileUpToDate():
+			Source.clean(self)
+			self.fetchAndVerifyFile()
+
+	def isFileUpToDate (self):
+		file = os.path.join(EXTERNAL_DIR, pkg.baseDir, pkg.extractDir, pkg.filename)
+		if os.path.exists(file):
+			return computeChecksum(readFile(file)) == self.checksum
+		else:
+			return False
+
+	def connectToUrl (self, url):
+		result = None
+
+		if sys.version_info < (3, 0):
+			from urllib2 import urlopen
+		else:
+			from urllib.request import urlopen
+
+		if args.insecure:
+			print("Ignoring certificate checks")
+			ssl_context = ssl._create_unverified_context()
+			result = urlopen(url, context=ssl_context)
+		else:
+			result = urlopen(url)
+
+		return result
+
+	def fetchAndVerifyFile (self):
+		print("Fetching %s" % self.url)
+
+		req			= self.connectToUrl(self.url)
+		data		= req.read()
+		checksum	= computeChecksum(data)
+		dstPath		= os.path.join(EXTERNAL_DIR, self.baseDir, self.extractDir, self.filename)
+
+		if checksum != self.checksum:
+			raise Exception("Checksum mismatch for %s, expected %s, got %s" % (self.filename, self.checksum, checksum))
+
+		if not os.path.exists(os.path.dirname(dstPath)):
+			os.mkdir(os.path.dirname(dstPath))
+
+		writeFile(dstPath, data)
+
 class GitRepo (Source):
-	def __init__(self, httpsUrl, sshUrl, revision, baseDir, extractDir = "src"):
+	def __init__(self, httpsUrl, sshUrl, revision, baseDir, extractDir = "src", removeTags = []):
 		Source.__init__(self, baseDir, extractDir)
 		self.httpsUrl	= httpsUrl
 		self.sshUrl		= sshUrl
 		self.revision	= revision
+		self.removeTags	= removeTags
 
 	def detectProtocol(self, cmdProtocol = None):
 		# reuse parent repo protocol
@@ -228,7 +281,12 @@ class GitRepo (Source):
 
 		pushWorkingDir(fullDstPath)
 		try:
-			execute(["git", "fetch", url, "+refs/heads/*:refs/remotes/origin/*"])
+			for tag in self.removeTags:
+				proc = subprocess.Popen(['git', 'tag', '-l', tag], stdout=subprocess.PIPE)
+				(stdout, stderr) = proc.communicate()
+				if proc.returncode == 0:
+					execute(["git", "tag", "-d",tag])
+			execute(["git", "fetch", "--tags", url, "+refs/heads/*:refs/remotes/origin/*"])
 			execute(["git", "checkout", self.revision])
 		finally:
 			popWorkingDir()
@@ -249,21 +307,32 @@ PACKAGES = [
 		"c9d164ec247f426a525a7b89936694aefbc91fb7a50182b198898b8fc91174b4",
 		"libpng",
 		postExtract = postExtractLibpng),
+	SourceFile(
+		"https://raw.githubusercontent.com/baldurk/renderdoc/v1.1/renderdoc/api/app/renderdoc_app.h",
+		"renderdoc_app.h",
+		"e7b5f0aa5b1b0eadc63a1c624c0ca7f5af133aa857d6a4271b0ef3d0bdb6868e",
+		"renderdoc"),
 	GitRepo(
 		"https://github.com/KhronosGroup/SPIRV-Tools.git",
 		None,
-		"0b0454c42c6b6f6746434bd5c78c5c70f65d9c51",
+		"e0292c269d6f5c8481afb9f2d043c74ee11ca24f",
 		"spirv-tools"),
 	GitRepo(
 		"https://github.com/KhronosGroup/glslang.git",
 		None,
-		"4f54c0c487238d576255a50c821387c13b0d040b",
-		"glslang"),
+		"2898223375d57fb3974f24e1e944bb624f67cb73",
+		"glslang",
+		removeTags = ["master-tot"]),
 	GitRepo(
 		"https://github.com/KhronosGroup/SPIRV-Headers.git",
 		None,
-		"2bf02308656f97898c5f7e433712f21737c61e4e",
+		"17da9f8231f78cf519b4958c2229463a63ead9e2",
 		"spirv-headers"),
+	GitRepo(
+		"https://github.com/Igalia/vkrunner.git",
+		None,
+		"79229ee3662da691240bde7fb6c6578e0e10e3f1",
+		"vkrunner"),
 ]
 
 def parseArgs ():

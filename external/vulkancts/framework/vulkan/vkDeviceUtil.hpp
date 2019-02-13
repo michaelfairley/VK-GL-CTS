@@ -37,14 +37,29 @@ class CommandLine;
 namespace vk
 {
 
-Move<VkInstance>	createDefaultInstance	(const PlatformInterface&			vkPlatform);
 Move<VkInstance>	createDefaultInstance	(const PlatformInterface&			vkPlatform,
+											 deUint32							apiVersion);
+
+Move<VkInstance>	createDefaultInstance	(const PlatformInterface&			vkPlatform,
+											 deUint32							apiVersion,
 											 const std::vector<std::string>&	enabledLayers,
 											 const std::vector<std::string>&	enabledExtensions,
 											 const VkAllocationCallbacks*		pAllocator	= DE_NULL);
 
+Move<VkInstance>	createInstanceWithExtensions (const PlatformInterface&			vkp,
+												  const deUint32					version,
+												  const std::vector<std::string>	requiredExtensions);
+
+Move<VkInstance>	createInstanceWithExtension (const PlatformInterface&	vkp,
+												 const deUint32				version,
+												 const std::string			requiredExtension);
+
+deUint32			chooseDeviceIndex		(const InstanceInterface&			vkInstance,
+											 const VkInstance					instance,
+											 const tcu::CommandLine&			cmdLine);
+
 VkPhysicalDevice	chooseDevice			(const InstanceInterface&			vkInstance,
-											 VkInstance							instance,
+											 const VkInstance					instance,
 											 const tcu::CommandLine&			cmdLine);
 
 } // vk

@@ -17,8 +17,8 @@
  * limitations under the License.
  *
  */ /*!
- * \file
- * \brief
+ * \file gl4cCopyImageTests.cpp
+ * \brief Implements CopyImageSubData functional tests.
  */ /*-------------------------------------------------------------------*/
 
 #include "gl4cCopyImageTests.hpp"
@@ -4893,6 +4893,37 @@ tcu::TestNode::IterateResult SamplesMismatchTest::iterate()
 		throw exc;
 	}
 
+	GLenum expected_result = test_case.m_expected_result;
+
+	if (test_case.m_dst_n_samples > 0 && test_case.m_src_n_samples > 0)
+	{
+		/* Implementations are allowed to use more samples than requested, so we need
+		 * to verify the actual sample counts allocated by the hardware and adjust
+		 * the expected result if they are different from what we requested.
+		 */
+		GLint num_src_samples;
+		GLint num_dst_samples;
+		gl.bindTexture(test_case.m_dst_target, m_dst_tex_name);
+		gl.getTexLevelParameteriv(test_case.m_dst_target, 0, GL_TEXTURE_SAMPLES, &num_dst_samples);
+		gl.bindTexture(test_case.m_src_target, m_src_tex_name);
+		gl.getTexLevelParameteriv(test_case.m_src_target, 0, GL_TEXTURE_SAMPLES, &num_src_samples);
+		if (num_dst_samples != test_case.m_dst_n_samples || num_src_samples != test_case.m_src_n_samples)
+		{
+			/* The hardware allocated a different number of samples, check if this affects the expected
+			 * result of the test. This can happen if we requested different sample counts but the
+			 * hardware ended up allocating the same or viceversa.
+			 */
+			if (test_case.m_dst_n_samples != test_case.m_src_n_samples && num_dst_samples == num_src_samples)
+			{
+				expected_result = GL_NO_ERROR;
+			}
+			else if (test_case.m_dst_n_samples == test_case.m_src_n_samples && num_dst_samples != num_src_samples)
+			{
+				expected_result = GL_INVALID_OPERATION;
+			}
+		}
+	}
+
 	/* Execute CopyImageSubData */
 	gl.copyImageSubData(m_src_tex_name, test_case.m_src_target, 0 /* srcLevel */, 0 /* srcX */, 0 /* srcY */,
 						0 /* srcZ */, m_dst_tex_name, test_case.m_dst_target, 0 /* dstLevel */, 0 /* dstX */,
@@ -4900,7 +4931,7 @@ tcu::TestNode::IterateResult SamplesMismatchTest::iterate()
 
 	/* Verify generated error */
 	error  = gl.getError();
-	result = (test_case.m_expected_result == error);
+	result = (expected_result == error);
 
 	/* Free resources */
 	clean();
@@ -4922,7 +4953,7 @@ tcu::TestNode::IterateResult SamplesMismatchTest::iterate()
 	else
 	{
 		m_context.getTestContext().getLog()
-			<< tcu::TestLog::Message << "Failure. Expected result: " << glu::getErrorStr(test_case.m_expected_result)
+			<< tcu::TestLog::Message << "Failure. Expected result: " << glu::getErrorStr(expected_result)
 			<< " got: " << glu::getErrorStr(error)
 			<< ". Source target: " << glu::getTextureTargetStr(test_case.m_src_target)
 			<< " samples: " << test_case.m_src_n_samples
@@ -5715,6 +5746,152 @@ void InvalidAlignmentTest::clean()
 	m_dst_tex_name = 0;
 	m_src_tex_name = 0;
 }
+
+/** Constructor
+ *
+ * @param context Text context
+ **/
+IntegerTexTest::IntegerTexTest(deqp::Context& context)
+	: TestCase(
+		  context, "integer_tex",
+		  "Test verifies if INVALID_OPERATION is generated when texture provided to CopySubImageData is incomplete")
+	, m_dst_buf_name(0)
+	, m_dst_tex_name(0)
+	, m_src_buf_name(0)
+	, m_src_tex_name(0)
+	, m_test_case_index(0)
+{
+}
+
+/** Execute test
+ *
+ * @return CONTINUE as long there are more test case, STOP otherwise
+ **/
+tcu::TestNode::IterateResult IntegerTexTest::iterate()
+{
+	testCase testCases[] = { { GL_R32I, GL_INT }, { GL_R32UI, GL_UNSIGNED_INT } };
+
+	const unsigned int width  = 16;
+	const unsigned int height = 16;
+
+	const Functions&			 gl		   = m_context.getRenderContext().getFunctions();
+	tcu::TestNode::IterateResult it_result = tcu::TestNode::STOP;
+	const testCase&				 test_case = testCases[m_test_case_index];
+
+	std::vector<int> data_buf(width * height, 1);
+	m_dst_tex_name = createTexture(width, height, test_case.m_internal_format, test_case.m_type, &data_buf[0],
+								   GL_NEAREST_MIPMAP_LINEAR, GL_LINEAR);
+	std::fill(data_buf.begin(), data_buf.end(), 2);
+	m_src_tex_name = createTexture(width, height, test_case.m_internal_format, test_case.m_type, &data_buf[0],
+								   GL_NEAREST_MIPMAP_LINEAR, GL_LINEAR);
+
+	/* Execute CopyImageSubData */
+	gl.copyImageSubData(m_src_tex_name, GL_TEXTURE_2D, 0 /* srcLevel */, 0 /* srcX */, 0 /* srcY */, 0 /* srcZ */,
+						m_dst_tex_name, GL_TEXTURE_2D, 0 /* dstLevel */, 0 /* dstX */, 0 /* dstY */, 0 /* dstZ */,
+						1 /* srcWidth */, 1 /* srcHeight */, 1 /* srcDepth */);
+
+	/* Check generated error */
+	GLenum error = gl.getError();
+	if (error == GL_NO_ERROR)
+	{
+		/* Verify result */
+		std::fill(data_buf.begin(), data_buf.end(), 3);
+
+		gl.bindTexture(GL_TEXTURE_2D, m_dst_tex_name);
+		GLU_EXPECT_NO_ERROR(gl.getError(), "BindTexture");
+
+		gl.getTexImage(GL_TEXTURE_2D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data_buf[0]);
+		GLU_EXPECT_NO_ERROR(gl.getError(), "GetTexImage");
+
+		if ((data_buf[0] == 2) && (std::count(data_buf.begin(), data_buf.end(), 1) == (width * height - 1)))
+		{
+			m_context.getTestContext().setTestResult(QP_TEST_RESULT_PASS, "Pass");
+
+			/* Increase index */
+			++m_test_case_index;
+
+			/* Are there any test cases left */
+			if (DE_LENGTH_OF_ARRAY(testCases) > m_test_case_index)
+				it_result = tcu::TestNode::CONTINUE;
+		}
+		else
+		{
+			m_context.getTestContext().getLog()
+				<< tcu::TestLog::Message << "Failure. Image data is not valid." << tcu::TestLog::EndMessage;
+			m_context.getTestContext().setTestResult(QP_TEST_RESULT_FAIL, "Fail");
+		}
+	}
+	else
+	{
+		m_context.getTestContext().getLog()
+			<< tcu::TestLog::Message << "Failure. Expected no error, got: " << glu::getErrorStr(error)
+			<< ". Texture internal format: " << glu::getTextureFormatStr(test_case.m_internal_format)
+			<< tcu::TestLog::EndMessage;
+		m_context.getTestContext().setTestResult(QP_TEST_RESULT_FAIL, "Fail");
+	}
+
+	/* Remove resources */
+	clean();
+
+	/* Done */
+	return it_result;
+}
+
+/** Create texture
+ *
+ **/
+unsigned int IntegerTexTest::createTexture(int width, int height, GLint internalFormat, GLuint type, const void* data,
+										   int minFilter, int magFilter)
+{
+	const Functions& gl = m_context.getRenderContext().getFunctions();
+	GLuint			 tex_name;
+
+	gl.genTextures(1, &tex_name);
+	GLU_EXPECT_NO_ERROR(gl.getError(), "GenTextures");
+	gl.bindTexture(GL_TEXTURE_2D, tex_name);
+	GLU_EXPECT_NO_ERROR(gl.getError(), "BindTexture");
+	gl.texImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, GL_RED_INTEGER, type, data);
+	GLU_EXPECT_NO_ERROR(gl.getError(), "TexImage2D");
+	gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	GLU_EXPECT_NO_ERROR(gl.getError(), "TexParameteri");
+	gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	GLU_EXPECT_NO_ERROR(gl.getError(), "TexParameteri");
+	gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
+	GLU_EXPECT_NO_ERROR(gl.getError(), "TexParameteri");
+	gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
+	GLU_EXPECT_NO_ERROR(gl.getError(), "TexParameteri");
+	gl.bindTexture(GL_TEXTURE_2D, 0);
+
+	return tex_name;
+}
+
+/** Cleans resources
+ *
+ **/
+void IntegerTexTest::clean()
+{
+	const Functions& gl = m_context.getRenderContext().getFunctions();
+
+	/* Clean textures and buffers. Errors ignored */
+	gl.deleteTextures(1, &m_dst_tex_name);
+	gl.deleteTextures(1, &m_src_tex_name);
+
+	m_dst_tex_name = 0;
+	m_src_tex_name = 0;
+
+	if (0 != m_dst_buf_name)
+	{
+		gl.deleteBuffers(1, &m_dst_buf_name);
+		m_dst_buf_name = 0;
+	}
+
+	if (0 != m_src_buf_name)
+	{
+		gl.deleteBuffers(1, &m_src_buf_name);
+		m_src_buf_name = 0;
+	}
+}
+
 } /* namespace CopyImage */
 
 CopyImageTests::CopyImageTests(deqp::Context& context) : TestCaseGroup(context, "copy_image", "")
@@ -5739,5 +5916,6 @@ void CopyImageTests::init()
 	addChild(new CopyImage::NonExistentMipMapTest(m_context));
 	addChild(new CopyImage::ExceedingBoundariesTest(m_context));
 	addChild(new CopyImage::InvalidAlignmentTest(m_context));
+	addChild(new CopyImage::IntegerTexTest(m_context));
 }
 } /* namespace gl4cts */

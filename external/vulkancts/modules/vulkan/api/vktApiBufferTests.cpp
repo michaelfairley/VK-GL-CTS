@@ -149,10 +149,11 @@ private:
 	{
 										SparseContext					(Move<VkDevice>&			device,
 																		 const deUint32				queueFamilyIndex,
-																		 const InstanceInterface&	interface)
+																		 const PlatformInterface&	platformInterface,
+																		 VkInstance					instance)
 										: m_device						(device)
 										, m_queueFamilyIndex			(queueFamilyIndex)
-										, m_deviceInterface				(interface, *m_device)
+										, m_deviceInterface				(platformInterface, instance, *m_device)
 		{
 		}
 
@@ -217,9 +218,9 @@ private:
 				&deviceFeatures
 			};
 
-			Move<VkDevice>				device							= createDevice(vk, physicalDevice, &deviceInfo);
+			Move<VkDevice>				device							= createDevice(m_context.getPlatformInterface(), m_context.getInstance(), vk, physicalDevice, &deviceInfo);
 
-			return new SparseContext(device, queueIndex, vk);
+			return new SparseContext(device, queueIndex, m_context.getPlatformInterface(), m_context.getInstance());
 		}
 
 		return DE_NULL;
@@ -261,6 +262,20 @@ public:
 		return new BufferTestInstance(ctx, m_testCase);
 	}
 
+	virtual void						checkSupport					(Context&					ctx) const
+	{
+		const VkPhysicalDeviceFeatures&		physicalDeviceFeatures = getPhysicalDeviceFeatures(ctx.getInstanceInterface(), ctx.getPhysicalDevice());
+
+		if ((m_testCase.flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT) && !physicalDeviceFeatures.sparseBinding)
+			TCU_THROW(NotSupportedError, "Sparse bindings feature is not supported");
+
+		if ((m_testCase.flags & VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT) && !physicalDeviceFeatures.sparseResidencyBuffer)
+			TCU_THROW(NotSupportedError, "Sparse buffer residency feature is not supported");
+
+		if ((m_testCase.flags & VK_BUFFER_CREATE_SPARSE_ALIASED_BIT) && !physicalDeviceFeatures.sparseResidencyAliased)
+			TCU_THROW(NotSupportedError, "Sparse aliased residency feature is not supported");
+	}
+
 private:
 	BufferCaseParameters				m_testCase;
 };
@@ -287,15 +302,18 @@ class DedicatedAllocationBuffersTestCase : public TestCase
 	{
 		tcu::TestLog&					log								= m_testCtx.getLog();
 		log << tcu::TestLog::Message << getBufferUsageFlagsStr(m_testCase.usage) << tcu::TestLog::EndMessage;
-		const std::vector<std::string>&	extensions						= ctx.getDeviceExtensions();
-		const deBool					isSupported						= std::find(extensions.begin(), extensions.end(), "VK_KHR_dedicated_allocation") != extensions.end();
+		return new DedicatedAllocationBufferTestInstance(ctx, m_testCase);
+	}
+
+	virtual void						checkSupport					(Context&					ctx) const
+	{
+		const std::vector<std::string>&	extensions		= ctx.getDeviceExtensions();
+		const deBool					isSupported		= isDeviceExtensionSupported(ctx.getUsedApiVersion(), extensions, "VK_KHR_dedicated_allocation");
 		if (!isSupported)
 		{
 			TCU_THROW(NotSupportedError, "Not supported");
 		}
-		return new DedicatedAllocationBufferTestInstance(ctx, m_testCase);
 	}
-
 private:
 	BufferCaseParameters				m_testCase;
 };
@@ -478,17 +496,6 @@ tcu::TestStatus BufferTestInstance::bufferCreateAndAllocTest			(VkDeviceSize				
 
 tcu::TestStatus							BufferTestInstance::iterate		(void)
 {
-	const VkPhysicalDeviceFeatures&		physicalDeviceFeatures			= getPhysicalDeviceFeatures(getInstanceInterface(), getPhysicalDevice());
-
-	if ((m_testCase.flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT ) && !physicalDeviceFeatures.sparseBinding)
-		TCU_THROW(NotSupportedError, "Sparse bindings feature is not supported");
-
-	if ((m_testCase.flags & VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT ) && !physicalDeviceFeatures.sparseResidencyBuffer)
-		TCU_THROW(NotSupportedError, "Sparse buffer residency feature is not supported");
-
-	if ((m_testCase.flags & VK_BUFFER_CREATE_SPARSE_ALIASED_BIT ) && !physicalDeviceFeatures.sparseResidencyAliased)
-		TCU_THROW(NotSupportedError, "Sparse aliased residency feature is not supported");
-
 	const VkDeviceSize					testSizes[]						=
 	{
 		1,
@@ -521,16 +528,16 @@ tcu::TestStatus							DedicatedAllocationBufferTestInstance::bufferCreateAndAllo
 										memoryProperties				= getPhysicalDeviceMemoryProperties(vkInstance, vkPhysicalDevice);
 	const VkPhysicalDeviceLimits		limits							= getPhysicalDeviceProperties(vkInstance, vkPhysicalDevice).limits;
 
-	VkMemoryDedicatedRequirementsKHR	dedicatedRequirements			=
+	VkMemoryDedicatedRequirements	dedicatedRequirements			=
 	{
-		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS_KHR,			// VkStructureType			sType;
+		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS,				// VkStructureType			sType;
 		DE_NULL,														// const void*				pNext;
 		false,															// VkBool32					prefersDedicatedAllocation
 		false															// VkBool32					requiresDedicatedAllocation
 	};
-	VkMemoryRequirements2KHR			memReqs							=
+	VkMemoryRequirements2			memReqs							=
 	{
-		VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2_KHR,					// VkStructureType			sType
+		VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,						// VkStructureType			sType
 		&dedicatedRequirements,											// void*					pNext
 		{0, 0, 0}														// VkMemoryRequirements		memoryRequirements
 	};
@@ -553,14 +560,14 @@ tcu::TestStatus							DedicatedAllocationBufferTestInstance::bufferCreateAndAllo
 
 	Move<VkBuffer>						buffer							= createBuffer(vk, vkDevice, &bufferParams);
 
-	VkBufferMemoryRequirementsInfo2KHR	info							=
+	VkBufferMemoryRequirementsInfo2	info							=
 	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2_KHR,		// VkStructureType			sType
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,			// VkStructureType			sType
 		DE_NULL,														// const void*				pNext
 		*buffer															// VkBuffer					buffer
 	};
 
-	vk.getBufferMemoryRequirements2KHR(vkDevice, &info, &memReqs);
+	vk.getBufferMemoryRequirements2(vkDevice, &info, &memReqs);
 
 	if (dedicatedRequirements.requiresDedicatedAllocation == VK_TRUE)
 	{
@@ -572,11 +579,20 @@ tcu::TestStatus							DedicatedAllocationBufferTestInstance::bufferCreateAndAllo
 	const deUint32						heapTypeIndex					= static_cast<deUint32>(deCtz32(memReqs.memoryRequirements.memoryTypeBits));
 	const VkMemoryType					memoryType						= memoryProperties.memoryTypes[heapTypeIndex];
 	const VkMemoryHeap					memoryHeap						= memoryProperties.memoryHeaps[memoryType.heapIndex];
-	const VkDeviceSize					maxBufferSize					= deAlign64(memoryHeap.size >> 1u, memReqs.memoryRequirements.alignment);
 	const deUint32						shrinkBits						= 4u;	// number of bits to shift when reducing the size with each iteration
 
+	// Buffer size - Choose half of the reported heap size for the maximum buffer size, we
+	// should attempt to test as large a portion as possible.
+	//
+	// However on a system where device memory is shared with the system, the maximum size
+	// should be tested against the platform memory limits as a significant portion of the heap
+	// may already be in use by the operating system and other running processes.
+	const VkDeviceSize maxBufferSize = getMaxBufferSize(memoryHeap.size,
+													   memReqs.memoryRequirements.alignment,
+													   getPlatformMemoryLimits(m_context));
+
 	Move<VkDeviceMemory>				memory;
-	size = std::min(size, maxBufferSize);
+	size = deAlign64(std::min(size, maxBufferSize >> 1), memReqs.memoryRequirements.alignment);
 	while (*memory == DE_NULL)
 	{
 		// Create the buffer
@@ -602,7 +618,7 @@ tcu::TestStatus							DedicatedAllocationBufferTestInstance::bufferCreateAndAllo
 		}
 
 		info.buffer = *buffer;
-		vk.getBufferMemoryRequirements2KHR(vkDevice, &info, &memReqs); // get the proper size requirement
+		vk.getBufferMemoryRequirements2(vkDevice, &info, &memReqs);		// get the proper size requirement
 
 		if (size > memReqs.memoryRequirements.size)
 		{
@@ -616,10 +632,10 @@ tcu::TestStatus							DedicatedAllocationBufferTestInstance::bufferCreateAndAllo
 			VkResult					result							= VK_ERROR_OUT_OF_HOST_MEMORY;
 			VkDeviceMemory				rawMemory						= DE_NULL;
 
-			vk::VkMemoryDedicatedAllocateInfoKHR
+			vk::VkMemoryDedicatedAllocateInfo
 										dedicatedInfo					=
 			{
-				VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR,	// VkStructureType			sType
+				VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,		// VkStructureType			sType
 				DE_NULL,												// const void*				pNext
 				DE_NULL,												// VkImage					image
 				*buffer													// VkBuffer					buffer

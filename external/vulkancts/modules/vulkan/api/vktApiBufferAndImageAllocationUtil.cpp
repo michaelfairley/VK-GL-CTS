@@ -76,7 +76,7 @@ void BufferDedicatedAllocation::createTestBuffer						(VkDeviceSize				size,
 {
 	DE_UNREF(allocator);
 	const std::vector<std::string>&	extensions							= context.getDeviceExtensions();
-	const deBool					isSupported							= std::find(extensions.begin(), extensions.end(), "VK_KHR_dedicated_allocation") != extensions.end();
+	const deBool					isSupported							= isDeviceExtensionSupported(context.getUsedApiVersion(), extensions, "VK_KHR_dedicated_allocation");
 	if (!isSupported)
 	{
 		TCU_THROW(NotSupportedError, "Not supported");
@@ -111,7 +111,8 @@ void ImageSuballocation::createTestImage								(tcu::IVec2					size,
 																		 Allocator&					allocator,
 																		 Move<VkImage>&				image,
 																		 const MemoryRequirement&	requirement,
-																		 de::MovePtr<Allocation>&	memory) const
+																		 de::MovePtr<Allocation>&	memory,
+																		 VkImageTiling				tiling) const
 {
 	const VkDevice						vkDevice						= context.getDevice();
 	const DeviceInterface&				vk								= context.getDeviceInterface();
@@ -128,8 +129,9 @@ void ImageSuballocation::createTestImage								(tcu::IVec2					size,
 		1u,																// deUint32					mipLevels;
 		1u,																// deUint32					arraySize;
 		VK_SAMPLE_COUNT_1_BIT,											// deUint32					samples;
-		VK_IMAGE_TILING_OPTIMAL,										// VkImageTiling			tiling;
-		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, // VkImageUsageFlags	usage;
+		tiling,															// VkImageTiling			tiling;
+		(vk::VkImageUsageFlags)((tiling == VK_IMAGE_TILING_LINEAR) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT :
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT), // VkImageUsageFlags	usage;
 		VK_SHARING_MODE_EXCLUSIVE,										// VkSharingMode			sharingMode;
 		1u,																// deUint32					queueFamilyCount;
 		&queueFamilyIndex,												// const deUint32*			pQueueFamilyIndices;
@@ -147,11 +149,12 @@ void ImageDedicatedAllocation::createTestImage							(tcu::IVec2					size,
 																		 Allocator&					allocator,
 																		 Move<VkImage>&				image,
 																		 const MemoryRequirement&	requirement,
-																		 de::MovePtr<Allocation>&	memory) const
+																		 de::MovePtr<Allocation>&	memory,
+																		 VkImageTiling				tiling) const
 {
 	DE_UNREF(allocator);
 	const std::vector<std::string>&		extensions						= context.getDeviceExtensions();
-	const deBool						isSupported						= std::find(extensions.begin(), extensions.end(), "VK_KHR_dedicated_allocation") != extensions.end();
+	const deBool						isSupported						= isDeviceExtensionSupported(context.getUsedApiVersion(), extensions, "VK_KHR_dedicated_allocation");
 	if (!isSupported)
 	{
 		TCU_THROW(NotSupportedError, "Not supported");
@@ -174,8 +177,9 @@ void ImageDedicatedAllocation::createTestImage							(tcu::IVec2					size,
 		1u,																// deUint32					mipLevels;
 		1u,																// deUint32					arraySize;
 		VK_SAMPLE_COUNT_1_BIT,											// deUint32					samples;
-		VK_IMAGE_TILING_OPTIMAL,										// VkImageTiling			tiling;
-		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, // VkImageUsageFlags	usage;
+		tiling,															// VkImageTiling			tiling;
+		(vk::VkImageUsageFlags)((tiling == VK_IMAGE_TILING_LINEAR) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT :
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT), // VkImageUsageFlags	usage;
 		VK_SHARING_MODE_EXCLUSIVE,										// VkSharingMode			sharingMode;
 		1u,																// deUint32					queueFamilyCount;
 		&queueFamilyIndex,												// const deUint32*			pQueueFamilyIndices;

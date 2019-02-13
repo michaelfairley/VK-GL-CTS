@@ -32,6 +32,7 @@
 #include "vkPrograms.hpp"
 #include "vkTypeUtil.hpp"
 #include "vkImageUtil.hpp"
+#include "vkCmdUtil.hpp"
 
 #include "tcuVector.hpp"
 #include "tcuTextureUtil.hpp"
@@ -86,6 +87,18 @@ InvertedDepthRangesTestInstance::InvertedDepthRangesTestInstance (Context& conte
 	const DeviceInterface&	vk		= m_context.getDeviceInterface();
 	const VkDevice			device	= m_context.getDevice();
 
+	if (m_params.depthClampEnable && !m_context.getDeviceFeatures().depthClamp)
+		TCU_THROW(NotSupportedError, "DepthClamp device feature not supported.");
+
+	if (params.minDepth > 1.0f	||
+		params.minDepth < 0.0f	||
+		params.maxDepth > 1.0f	||
+		params.maxDepth < 0.0f)
+	{
+		if (!de::contains(context.getDeviceExtensions().begin(), context.getDeviceExtensions().end(), "VK_EXT_depth_range_unrestricted"))
+			throw tcu::NotSupportedError("Test variant with minDepth/maxDepth outside 0..1 requires the VK_EXT_depth_range_unrestricted extension");
+	}
+
 	// Vertex data
 	{
 		std::vector<Vec4> vertexData;
@@ -117,7 +130,7 @@ InvertedDepthRangesTestInstance::InvertedDepthRangesTestInstance (Context& conte
 			VK_IMAGE_TILING_OPTIMAL,				// tiling,
 			targetImageUsageFlags);					// usage,
 
-		m_colorTargetImage = Image::createAndAlloc(vk, device, targetImageCreateInfo, m_context.getDefaultAllocator());
+		m_colorTargetImage = Image::createAndAlloc(vk, device, targetImageCreateInfo, m_context.getDefaultAllocator(), m_context.getUniversalQueueFamilyIndex());
 
 		RenderPassCreateInfo	renderPassCreateInfo;
 		renderPassCreateInfo.addAttachment(AttachmentDescription(
@@ -185,11 +198,7 @@ InvertedDepthRangesTestInstance::InvertedDepthRangesTestInstance (Context& conte
 
 	// Graphics pipeline
 
-	const VkRect2D scissor =
-	{
-		{ 0,	0	},	// x, y
-		{ 256,	256	},	// width, height
-	};
+	const VkRect2D scissor = makeRect2D(256u, 256u);
 
 	std::vector<VkDynamicState>		dynamicStates;
 	dynamicStates.push_back(VK_DYNAMIC_STATE_VIEWPORT);
@@ -242,10 +251,7 @@ tcu::ConstPixelBufferAccess InvertedDepthRangesTestInstance::draw (const VkViewp
 
 	// Draw
 
-	{
-		const CmdBufferBeginInfo beginInfo;
-		vk.beginCommandBuffer(*cmdBuffer, &beginInfo);
-	}
+	beginCommandBuffer(vk, *cmdBuffer);
 
 	vk.cmdSetViewport(*cmdBuffer, 0u, 1u, &viewport);
 
@@ -253,7 +259,7 @@ tcu::ConstPixelBufferAccess InvertedDepthRangesTestInstance::draw (const VkViewp
 		const VkClearColorValue		clearColor			= makeClearValueColorF32(0.0f, 0.0f, 0.0f, 1.0f).color;
 		const ImageSubresourceRange subresourceRange	(VK_IMAGE_ASPECT_COLOR_BIT);
 
-		initialTransitionColor2DImage(vk, *cmdBuffer, m_colorTargetImage->object(), VK_IMAGE_LAYOUT_GENERAL);
+		initialTransitionColor2DImage(vk, *cmdBuffer, m_colorTargetImage->object(), VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 		vk.cmdClearColorImage(*cmdBuffer, m_colorTargetImage->object(), VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &subresourceRange);
 	}
 	{
@@ -267,12 +273,9 @@ tcu::ConstPixelBufferAccess InvertedDepthRangesTestInstance::draw (const VkViewp
 
 		vk.cmdPipelineBarrier(*cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 1, &memBarrier, 0, DE_NULL, 0, DE_NULL);
 	}
-	{
-		const VkRect2D				renderArea		= { { 0, 0 }, { 256, 256 } };
-		const RenderPassBeginInfo	renderPassBegin	(*m_renderPass, *m_framebuffer, renderArea);
 
-		vk.cmdBeginRenderPass(*cmdBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
-	}
+	beginRenderPass(vk, *cmdBuffer, *m_renderPass, *m_framebuffer, makeRect2D(0, 0, 256u, 256u));
+
 	{
 		const VkDeviceSize	offset	= 0;
 		const VkBuffer		buffer	= m_vertexBuffer->object();
@@ -282,28 +285,11 @@ tcu::ConstPixelBufferAccess InvertedDepthRangesTestInstance::draw (const VkViewp
 
 	vk.cmdBindPipeline(*cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *m_pipeline);
 	vk.cmdDraw(*cmdBuffer, 3, 1, 0, 0);
-	vk.cmdEndRenderPass(*cmdBuffer);
-	vk.endCommandBuffer(*cmdBuffer);
+	endRenderPass(vk, *cmdBuffer);
+	endCommandBuffer(vk, *cmdBuffer);
 
 	// Submit
-	{
-		const Unique<VkFence>	fence		(createFence(vk, device));
-		const VkSubmitInfo		submitInfo	=
-		{
-			VK_STRUCTURE_TYPE_SUBMIT_INFO,				// VkStructureType                sType;
-			DE_NULL,									// const void*                    pNext;
-			0,											// uint32_t                       waitSemaphoreCount;
-			DE_NULL,									// const VkSemaphore*             pWaitSemaphores;
-			(const VkPipelineStageFlags*)DE_NULL,		// const VkPipelineStageFlags*    pWaitDstStageMask;
-			1,											// uint32_t                       commandBufferCount;
-			&cmdBuffer.get(),							// const VkCommandBuffer*         pCommandBuffers;
-			0,											// uint32_t                       signalSemaphoreCount;
-			DE_NULL										// const VkSemaphore*             pSignalSemaphores;
-		};
-
-		VK_CHECK(vk.queueSubmit(queue, 1, &submitInfo, *fence));
-		VK_CHECK(vk.waitForFences(device, 1u, &fence.get(), VK_TRUE, ~0ull));
-	}
+	submitCommandsAndWait(vk, device, queue, cmdBuffer.get());
 
 	// Get result
 	{
@@ -343,12 +329,6 @@ MovePtr<tcu::TextureLevel> InvertedDepthRangesTestInstance::generateReferenceIma
 
 tcu::TestStatus InvertedDepthRangesTestInstance::iterate (void)
 {
-	// Check requirements
-
-	if (m_params.depthClampEnable && !m_context.getDeviceFeatures().depthClamp)
-		TCU_THROW(NotSupportedError, "DepthClamp device feature not supported.");
-
-
 	// Set up the viewport and draw
 
 	const VkViewport viewport =
@@ -447,10 +427,12 @@ void populateTestGroup (tcu::TestCaseGroup* testGroup)
 		float				delta;
 	} delta[] =
 	{
-		{ "deltazero",	0.0f	},
-		{ "deltasmall",	0.3f	},
-		{ "deltaone",	1.0f	},
-		{ "deltalarge",	2.7f	},
+		{ "deltazero",					0.0f	},
+		{ "deltasmall",					0.3f	},
+		{ "deltaone",					1.0f	},
+
+		// Range > 1.0 requires VK_EXT_depth_range_unrestricted extension
+		{ "depth_range_unrestricted",	2.7f	},
 	};
 
 	for (int ndxDepthClamp = 0; ndxDepthClamp < DE_LENGTH_OF_ARRAY(depthClamp); ++ndxDepthClamp)

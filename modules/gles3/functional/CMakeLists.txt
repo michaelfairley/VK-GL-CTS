@@ -53,6 +53,8 @@ set(DEQP_GLES3_FUNCTIONAL_SRCS
 	es3fFunctionalTests.hpp
 	es3fLifetimeTests.cpp
 	es3fLifetimeTests.hpp
+	es3fMultiviewTests.cpp
+	es3fMultiviewTests.hpp
 	es3fPrerequisiteTests.cpp
 	es3fPrerequisiteTests.hpp
 	es3fRasterizationTests.cpp
@@ -212,6 +214,8 @@ set(DEQP_GLES3_FUNCTIONAL_SRCS
 	es3fShaderFragDataTests.cpp
 	es3fShaderFragDataTests.hpp
 	)
+
+PCH(DEQP_GLES3_FUNCTIONAL_SRCS ../../pch.cpp)
 
 add_library(deqp-gles3-functional STATIC ${DEQP_GLES3_FUNCTIONAL_SRCS})
 target_link_libraries(deqp-gles3-functional deqp-gl-shared glutil glutil-sglr tcutil referencerenderer ${DEQP_GLES3_LIBRARIES})

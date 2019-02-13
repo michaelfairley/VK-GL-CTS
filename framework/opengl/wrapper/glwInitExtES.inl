@@ -1,7 +1,7 @@
 /* WARNING: This is auto-generated file. Do not modify, since changes will
  * be lost! Modify the generating script instead.
  *
- * Generated from Khronos GL API description (gl.xml) revision a3ee0ed08111d44ac3cb863d9e3e81a7c28f9d90.
+ * Generated from Khronos GL API description (gl.xml) revision b7aee529f02340247e45621e9dbd054817d39c71.
  */
 
 if (de::contains(extSet, "GL_KHR_blend_equation_advanced"))
@@ -22,6 +22,14 @@ if (de::contains(extSet, "GL_KHR_debug"))
 	gl->objectPtrLabel			= (glObjectPtrLabelFunc)		loader->get("glObjectPtrLabelKHR");
 	gl->popDebugGroup			= (glPopDebugGroupFunc)			loader->get("glPopDebugGroupKHR");
 	gl->pushDebugGroup			= (glPushDebugGroupFunc)		loader->get("glPushDebugGroupKHR");
+}
+
+if (de::contains(extSet, "GL_EXT_robustness"))
+{
+	gl->getGraphicsResetStatus	= (glGetGraphicsResetStatusFunc)	loader->get("glGetGraphicsResetStatusEXT");
+	gl->getnUniformfv			= (glGetnUniformfvFunc)				loader->get("glGetnUniformfvEXT");
+	gl->getnUniformiv			= (glGetnUniformivFunc)				loader->get("glGetnUniformivEXT");
+	gl->readnPixels				= (glReadnPixelsFunc)				loader->get("glReadnPixelsEXT");
 }
 
 if (de::contains(extSet, "GL_KHR_robustness"))
@@ -46,14 +54,6 @@ if (de::contains(extSet, "GL_EXT_tessellation_shader"))
 if (de::contains(extSet, "GL_EXT_geometry_shader"))
 {
 	gl->framebufferTexture	= (glFramebufferTextureFunc)	loader->get("glFramebufferTextureEXT");
-}
-
-if (de::contains(extSet, "GL_EXT_robustness"))
-{
-	gl->getGraphicsResetStatus	= (glGetGraphicsResetStatusFunc)	loader->get("glGetGraphicsResetStatusEXT");
-	gl->getnUniformfv			= (glGetnUniformfvFunc)				loader->get("glGetnUniformfvEXT");
-	gl->getnUniformiv			= (glGetnUniformivFunc)				loader->get("glGetnUniformivEXT");
-	gl->readnPixels				= (glReadnPixelsFunc)				loader->get("glReadnPixelsEXT");
 }
 
 if (de::contains(extSet, "GL_EXT_texture_buffer"))
@@ -194,4 +194,14 @@ if (de::contains(extSet, "GL_OES_draw_elements_base_vertex"))
 	gl->drawElementsInstancedBaseVertex	= (glDrawElementsInstancedBaseVertexFunc)	loader->get("glDrawElementsInstancedBaseVertexOES");
 	gl->drawRangeElementsBaseVertex		= (glDrawRangeElementsBaseVertexFunc)		loader->get("glDrawRangeElementsBaseVertexOES");
 	gl->multiDrawElementsBaseVertex		= (glMultiDrawElementsBaseVertexFunc)		loader->get("glMultiDrawElementsBaseVertexEXT");
+}
+
+if (de::contains(extSet, "GL_OVR_multiview"))
+{
+	gl->framebufferTextureMultiviewOVR	= (glFramebufferTextureMultiviewOVRFunc)	loader->get("glFramebufferTextureMultiviewOVR");
+}
+
+if (de::contains(extSet, "GL_OVR_multiview_multisampled_render_to_texture"))
+{
+	gl->framebufferTextureMultisampleMultiviewOVR	= (glFramebufferTextureMultisampleMultiviewOVRFunc)	loader->get("glFramebufferTextureMultisampleMultiviewOVR");
 }

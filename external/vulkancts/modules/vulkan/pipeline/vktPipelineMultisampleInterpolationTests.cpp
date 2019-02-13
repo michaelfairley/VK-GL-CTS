@@ -227,6 +227,8 @@ template<> void MSCase<MSCaseSampleQualifierDistinctValues>::initPrograms (vk::S
 
 template<> TestInstance* MSCase<MSCaseSampleQualifierDistinctValues>::createInstance (Context& context) const
 {
+	if (!context.getDeviceFeatures().sampleRateShading)
+		TCU_THROW(NotSupportedError, "sampleRateShading support required");
 	return new MSInstance<MSInstanceDistinctValues>(context, m_imageMSParams);
 }
 
@@ -923,7 +925,7 @@ tcu::TestCaseGroup* createMultisampleInterpolationTests (tcu::TestContext& testC
 
 	const deUint32 samplesElemCount = static_cast<deUint32>(sizeof(imageSamples) / sizeof(vk::VkSampleCountFlagBits));
 
-	de::MovePtr<tcu::TestCaseGroup> caseGroup(new tcu::TestCaseGroup(testCtx, "sample_interpolate_at_single_sample_", ""));
+	de::MovePtr<tcu::TestCaseGroup> caseGroup(new tcu::TestCaseGroup(testCtx, "sample_interpolate_at_single_sample", ""));
 
 	for (deUint32 imageSizeNdx = 0u; imageSizeNdx < sizesElemCount; ++imageSizeNdx)
 	{

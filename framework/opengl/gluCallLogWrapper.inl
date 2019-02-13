@@ -1,7 +1,7 @@
 /* WARNING: This is auto-generated file. Do not modify, since changes will
  * be lost! Modify the generating script instead.
  *
- * Generated from Khronos GL API description (gl.xml) revision a3ee0ed08111d44ac3cb863d9e3e81a7c28f9d90.
+ * Generated from Khronos GL API description (gl.xml) revision b7aee529f02340247e45621e9dbd054817d39c71.
  */
 
 void CallLogWrapper::glActiveShaderProgram (glw::GLuint pipeline, glw::GLuint program)
@@ -1096,11 +1096,11 @@ void CallLogWrapper::glDepthMask (glw::GLboolean flag)
 	m_gl.depthMask(flag);
 }
 
-void CallLogWrapper::glDepthRange (glw::GLdouble near, glw::GLdouble far)
+void CallLogWrapper::glDepthRange (glw::GLdouble n, glw::GLdouble f)
 {
 	if (m_enableLog)
-		m_log << TestLog::Message << "glDepthRange(" << near << ", " << far << ");" << TestLog::EndMessage;
-	m_gl.depthRange(near, far);
+		m_log << TestLog::Message << "glDepthRange(" << n << ", " << f << ");" << TestLog::EndMessage;
+	m_gl.depthRange(n, f);
 }
 
 void CallLogWrapper::glDepthRangeArrayfvOES (glw::GLuint first, glw::GLsizei count, const glw::GLfloat *v)
@@ -1566,6 +1566,20 @@ void CallLogWrapper::glFramebufferTextureLayer (glw::GLenum target, glw::GLenum 
 	if (m_enableLog)
 		m_log << TestLog::Message << "glFramebufferTextureLayer(" << getFramebufferTargetStr(target) << ", " << getFramebufferAttachmentStr(attachment) << ", " << texture << ", " << level << ", " << layer << ");" << TestLog::EndMessage;
 	m_gl.framebufferTextureLayer(target, attachment, texture, level, layer);
+}
+
+void CallLogWrapper::glFramebufferTextureMultisampleMultiviewOVR (glw::GLenum target, glw::GLenum attachment, glw::GLuint texture, glw::GLint level, glw::GLsizei samples, glw::GLint baseViewIndex, glw::GLsizei numViews)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glFramebufferTextureMultisampleMultiviewOVR(" << toHex(target) << ", " << toHex(attachment) << ", " << texture << ", " << level << ", " << samples << ", " << baseViewIndex << ", " << numViews << ");" << TestLog::EndMessage;
+	m_gl.framebufferTextureMultisampleMultiviewOVR(target, attachment, texture, level, samples, baseViewIndex, numViews);
+}
+
+void CallLogWrapper::glFramebufferTextureMultiviewOVR (glw::GLenum target, glw::GLenum attachment, glw::GLuint texture, glw::GLint level, glw::GLint baseViewIndex, glw::GLsizei numViews)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glFramebufferTextureMultiviewOVR(" << toHex(target) << ", " << toHex(attachment) << ", " << texture << ", " << level << ", " << baseViewIndex << ", " << numViews << ");" << TestLog::EndMessage;
+	m_gl.framebufferTextureMultiviewOVR(target, attachment, texture, level, baseViewIndex, numViews);
 }
 
 void CallLogWrapper::glFrontFace (glw::GLenum mode)
@@ -3676,6 +3690,83 @@ void CallLogWrapper::glMultiTexSubImage3DEXT (glw::GLenum texunit, glw::GLenum t
 	m_gl.multiTexSubImage3DEXT(texunit, target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels);
 }
 
+void CallLogWrapper::glMulticastBarrierNV (void)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastBarrierNV(" << ");" << TestLog::EndMessage;
+	m_gl.multicastBarrierNV();
+}
+
+void CallLogWrapper::glMulticastBlitFramebufferNV (glw::GLuint srcGpu, glw::GLuint dstGpu, glw::GLint srcX0, glw::GLint srcY0, glw::GLint srcX1, glw::GLint srcY1, glw::GLint dstX0, glw::GLint dstY0, glw::GLint dstX1, glw::GLint dstY1, glw::GLbitfield mask, glw::GLenum filter)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastBlitFramebufferNV(" << srcGpu << ", " << dstGpu << ", " << srcX0 << ", " << srcY0 << ", " << srcX1 << ", " << srcY1 << ", " << dstX0 << ", " << dstY0 << ", " << dstX1 << ", " << dstY1 << ", " << toHex(mask) << ", " << toHex(filter) << ");" << TestLog::EndMessage;
+	m_gl.multicastBlitFramebufferNV(srcGpu, dstGpu, srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
+}
+
+void CallLogWrapper::glMulticastBufferSubDataNV (glw::GLbitfield gpuMask, glw::GLuint buffer, glw::GLintptr offset, glw::GLsizeiptr size, const void *data)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastBufferSubDataNV(" << toHex(gpuMask) << ", " << buffer << ", " << offset << ", " << size << ", " << data << ");" << TestLog::EndMessage;
+	m_gl.multicastBufferSubDataNV(gpuMask, buffer, offset, size, data);
+}
+
+void CallLogWrapper::glMulticastCopyBufferSubDataNV (glw::GLuint readGpu, glw::GLbitfield writeGpuMask, glw::GLuint readBuffer, glw::GLuint writeBuffer, glw::GLintptr readOffset, glw::GLintptr writeOffset, glw::GLsizeiptr size)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastCopyBufferSubDataNV(" << readGpu << ", " << toHex(writeGpuMask) << ", " << readBuffer << ", " << writeBuffer << ", " << readOffset << ", " << writeOffset << ", " << size << ");" << TestLog::EndMessage;
+	m_gl.multicastCopyBufferSubDataNV(readGpu, writeGpuMask, readBuffer, writeBuffer, readOffset, writeOffset, size);
+}
+
+void CallLogWrapper::glMulticastCopyImageSubDataNV (glw::GLuint srcGpu, glw::GLbitfield dstGpuMask, glw::GLuint srcName, glw::GLenum srcTarget, glw::GLint srcLevel, glw::GLint srcX, glw::GLint srcY, glw::GLint srcZ, glw::GLuint dstName, glw::GLenum dstTarget, glw::GLint dstLevel, glw::GLint dstX, glw::GLint dstY, glw::GLint dstZ, glw::GLsizei srcWidth, glw::GLsizei srcHeight, glw::GLsizei srcDepth)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastCopyImageSubDataNV(" << srcGpu << ", " << toHex(dstGpuMask) << ", " << srcName << ", " << toHex(srcTarget) << ", " << srcLevel << ", " << srcX << ", " << srcY << ", " << srcZ << ", " << dstName << ", " << toHex(dstTarget) << ", " << dstLevel << ", " << dstX << ", " << dstY << ", " << dstZ << ", " << srcWidth << ", " << srcHeight << ", " << srcDepth << ");" << TestLog::EndMessage;
+	m_gl.multicastCopyImageSubDataNV(srcGpu, dstGpuMask, srcName, srcTarget, srcLevel, srcX, srcY, srcZ, dstName, dstTarget, dstLevel, dstX, dstY, dstZ, srcWidth, srcHeight, srcDepth);
+}
+
+void CallLogWrapper::glMulticastFramebufferSampleLocationsfvNV (glw::GLuint gpu, glw::GLuint framebuffer, glw::GLuint start, glw::GLsizei count, const glw::GLfloat *v)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastFramebufferSampleLocationsfvNV(" << gpu << ", " << framebuffer << ", " << start << ", " << count << ", " << toHex(reinterpret_cast<deUintptr>(static_cast<const void*>(v))) << ");" << TestLog::EndMessage;
+	m_gl.multicastFramebufferSampleLocationsfvNV(gpu, framebuffer, start, count, v);
+}
+
+void CallLogWrapper::glMulticastGetQueryObjecti64vNV (glw::GLuint gpu, glw::GLuint id, glw::GLenum pname, glw::GLint64 *params)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastGetQueryObjecti64vNV(" << gpu << ", " << id << ", " << toHex(pname) << ", " << toHex(reinterpret_cast<deUintptr>(static_cast<const void*>(params))) << ");" << TestLog::EndMessage;
+	m_gl.multicastGetQueryObjecti64vNV(gpu, id, pname, params);
+}
+
+void CallLogWrapper::glMulticastGetQueryObjectivNV (glw::GLuint gpu, glw::GLuint id, glw::GLenum pname, glw::GLint *params)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastGetQueryObjectivNV(" << gpu << ", " << id << ", " << toHex(pname) << ", " << toHex(reinterpret_cast<deUintptr>(static_cast<const void*>(params))) << ");" << TestLog::EndMessage;
+	m_gl.multicastGetQueryObjectivNV(gpu, id, pname, params);
+}
+
+void CallLogWrapper::glMulticastGetQueryObjectui64vNV (glw::GLuint gpu, glw::GLuint id, glw::GLenum pname, glw::GLuint64 *params)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastGetQueryObjectui64vNV(" << gpu << ", " << id << ", " << toHex(pname) << ", " << toHex(reinterpret_cast<deUintptr>(static_cast<const void*>(params))) << ");" << TestLog::EndMessage;
+	m_gl.multicastGetQueryObjectui64vNV(gpu, id, pname, params);
+}
+
+void CallLogWrapper::glMulticastGetQueryObjectuivNV (glw::GLuint gpu, glw::GLuint id, glw::GLenum pname, glw::GLuint *params)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastGetQueryObjectuivNV(" << gpu << ", " << id << ", " << toHex(pname) << ", " << toHex(reinterpret_cast<deUintptr>(static_cast<const void*>(params))) << ");" << TestLog::EndMessage;
+	m_gl.multicastGetQueryObjectuivNV(gpu, id, pname, params);
+}
+
+void CallLogWrapper::glMulticastWaitSyncNV (glw::GLuint signalGpu, glw::GLbitfield waitGpuMask)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glMulticastWaitSyncNV(" << signalGpu << ", " << toHex(waitGpuMask) << ");" << TestLog::EndMessage;
+	m_gl.multicastWaitSyncNV(signalGpu, waitGpuMask);
+}
+
 void CallLogWrapper::glNamedBufferData (glw::GLuint buffer, glw::GLsizeiptr size, const void *data, glw::GLenum usage)
 {
 	if (m_enableLog)
@@ -4626,6 +4717,13 @@ void CallLogWrapper::glReleaseShaderCompiler (void)
 	if (m_enableLog)
 		m_log << TestLog::Message << "glReleaseShaderCompiler(" << ");" << TestLog::EndMessage;
 	m_gl.releaseShaderCompiler();
+}
+
+void CallLogWrapper::glRenderGpuMaskNV (glw::GLbitfield mask)
+{
+	if (m_enableLog)
+		m_log << TestLog::Message << "glRenderGpuMaskNV(" << toHex(mask) << ");" << TestLog::EndMessage;
+	m_gl.renderGpuMaskNV(mask);
 }
 
 void CallLogWrapper::glRenderbufferStorage (glw::GLenum target, glw::GLenum internalformat, glw::GLsizei width, glw::GLsizei height)

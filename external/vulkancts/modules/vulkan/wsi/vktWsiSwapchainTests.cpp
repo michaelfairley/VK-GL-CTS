@@ -39,7 +39,10 @@
 #include "vkWsiPlatform.hpp"
 #include "vkWsiUtil.hpp"
 #include "vkAllocationCallbackUtil.hpp"
+#include "vkCmdUtil.hpp"
+#include "vkObjUtil.hpp"
 
+#include "tcuCommandLine.hpp"
 #include "tcuTestLog.hpp"
 #include "tcuFormatUtil.hpp"
 #include "tcuPlatform.hpp"
@@ -87,11 +90,13 @@ void checkAllSupported (const Extensions& supportedExtensions, const vector<stri
 }
 
 Move<VkInstance> createInstanceWithWsi (const PlatformInterface&		vkp,
+										deUint32						version,
 										const Extensions&				supportedExtensions,
 										Type							wsiType,
+										const vector<string>			extraExtensions,
 										const VkAllocationCallbacks*	pAllocator	= DE_NULL)
 {
-	vector<string>	extensions;
+	vector<string>	extensions = extraExtensions;
 
 	extensions.push_back("VK_KHR_surface");
 	extensions.push_back(getExtensionName(wsiType));
@@ -111,7 +116,7 @@ Move<VkInstance> createInstanceWithWsi (const PlatformInterface&		vkp,
 
 	checkAllSupported(supportedExtensions, extensions);
 
-	return createDefaultInstance(vkp, vector<string>(), extensions, pAllocator);
+	return vk::createDefaultInstance(vkp, version, vector<string>(), extensions, pAllocator);
 }
 
 VkPhysicalDeviceFeatures getDeviceFeaturesForWsi (void)
@@ -121,7 +126,9 @@ VkPhysicalDeviceFeatures getDeviceFeaturesForWsi (void)
 	return features;
 }
 
-Move<VkDevice> createDeviceWithWsi (const InstanceInterface&		vki,
+Move<VkDevice> createDeviceWithWsi (const PlatformInterface&		vkp,
+									VkInstance						instance,
+									const InstanceInterface&		vki,
 									VkPhysicalDevice				physicalDevice,
 									const Extensions&				supportedExtensions,
 									const deUint32					queueFamilyIndex,
@@ -161,23 +168,18 @@ Move<VkDevice> createDeviceWithWsi (const InstanceInterface&		vki,
 			TCU_THROW(NotSupportedError, (string(extensions[ndx]) + " is not supported").c_str());
 	}
 
-	return createDevice(vki, physicalDevice, &deviceParams, pAllocator);
-}
-
-deUint32 getNumQueueFamilyIndices (const InstanceInterface& vki, VkPhysicalDevice physicalDevice)
-{
-	deUint32	numFamilies		= 0;
-
-	vki.getPhysicalDeviceQueueFamilyProperties(physicalDevice, &numFamilies, DE_NULL);
-
-	return numFamilies;
+	return createDevice(vkp, instance, vki, physicalDevice, &deviceParams, pAllocator);
 }
 
 vector<deUint32> getSupportedQueueFamilyIndices (const InstanceInterface& vki, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface)
 {
-	const deUint32		numTotalFamilyIndices	= getNumQueueFamilyIndices(vki, physicalDevice);
-	vector<deUint32>	supportedFamilyIndices;
+	deUint32 numTotalFamilyIndices;
+	vki.getPhysicalDeviceQueueFamilyProperties(physicalDevice, &numTotalFamilyIndices, DE_NULL);
 
+	vector<VkQueueFamilyProperties> queueFamilyProperties(numTotalFamilyIndices);
+	vki.getPhysicalDeviceQueueFamilyProperties(physicalDevice, &numTotalFamilyIndices, &queueFamilyProperties[0]);
+
+	vector<deUint32>	supportedFamilyIndices;
 	for (deUint32 queueFamilyNdx = 0; queueFamilyNdx < numTotalFamilyIndices; ++queueFamilyNdx)
 	{
 		if (getPhysicalDeviceSurfaceSupport(vki, physicalDevice, queueFamilyNdx, surface) != VK_FALSE)
@@ -207,8 +209,22 @@ struct InstanceHelper
 		: supportedExtensions	(enumerateInstanceExtensionProperties(context.getPlatformInterface(),
 																	  DE_NULL))
 		, instance				(createInstanceWithWsi(context.getPlatformInterface(),
+													   context.getUsedApiVersion(),
 													   supportedExtensions,
 													   wsiType,
+													   vector<string>(),
+													   pAllocator))
+		, vki					(context.getPlatformInterface(), *instance)
+	{}
+
+	InstanceHelper (Context& context, Type wsiType, const vector<string>& extensions, const VkAllocationCallbacks* pAllocator = DE_NULL)
+		: supportedExtensions	(enumerateInstanceExtensionProperties(context.getPlatformInterface(),
+																	  DE_NULL))
+		, instance				(createInstanceWithWsi(context.getPlatformInterface(),
+													   context.getUsedApiVersion(),
+													   supportedExtensions,
+													   wsiType,
+													   extensions,
 													   pAllocator))
 		, vki					(context.getPlatformInterface(), *instance)
 	{}
@@ -229,12 +245,14 @@ struct DeviceHelper
 				  const VkAllocationCallbacks*	pAllocator = DE_NULL)
 		: physicalDevice	(chooseDevice(vki, instance, context.getTestContext().getCommandLine()))
 		, queueFamilyIndex	(chooseQueueFamilyIndex(vki, physicalDevice, surface))
-		, device			(createDeviceWithWsi(vki,
+		, device			(createDeviceWithWsi(context.getPlatformInterface(),
+												 context.getInstance(),
+												 vki,
 												 physicalDevice,
 												 enumerateDeviceExtensionProperties(vki, physicalDevice, DE_NULL),
 												 queueFamilyIndex,
 												 pAllocator))
-		, vkd				(vki, *device)
+		, vkd				(context.getPlatformInterface(), context.getInstance(), *device)
 		, queue				(getDeviceQueue(vkd, *device, queueFamilyIndex, 0))
 	{
 	}
@@ -559,6 +577,7 @@ vector<VkSwapchainCreateInfoKHR> generateSwapchainParameterCases (Type								ws
 
 tcu::TestStatus createSwapchainTest (Context& context, TestParameters params)
 {
+	tcu::TestLog&							log			= context.getTestContext().getLog();
 	const InstanceHelper					instHelper	(context, params.wsiType);
 	const NativeObjects						native		(context, instHelper.supportedExtensions, params.wsiType);
 	const Unique<VkSurfaceKHR>				surface		(createSurface(instHelper.vki, *instHelper.instance, params.wsiType, *native.display, *native.window));
@@ -567,21 +586,55 @@ tcu::TestStatus createSwapchainTest (Context& context, TestParameters params)
 
 	for (size_t caseNdx = 0; caseNdx < cases.size(); ++caseNdx)
 	{
+		std::ostringstream subcase;
+		subcase << "Sub-case " << (caseNdx+1) << " / " << cases.size() << ": ";
+
 		VkSwapchainCreateInfoKHR	curParams	= cases[caseNdx];
 
 		curParams.surface				= *surface;
 		curParams.queueFamilyIndexCount	= 1u;
 		curParams.pQueueFamilyIndices	= &devHelper.queueFamilyIndex;
 
-		context.getTestContext().getLog()
-			<< TestLog::Message << "Sub-case " << (caseNdx+1) << " / " << cases.size() << ": " << curParams << TestLog::EndMessage;
+		log << TestLog::Message << subcase.str() << curParams << TestLog::EndMessage;
 
-		{
-			const Unique<VkSwapchainKHR>	swapchain	(createSwapchainKHR(devHelper.vkd, *devHelper.device, &curParams));
+		// The Vulkan 1.1.87 spec contains the following VU for VkSwapchainCreateInfoKHR:
+		//
+		//     * imageFormat, imageUsage, imageExtent, and imageArrayLayers must be supported for VK_IMAGE_TYPE_2D
+		//     VK_IMAGE_TILING_OPTIMAL images as reported by vkGetPhysicalDeviceImageFormatProperties.
+		VkImageFormatProperties properties;
+		const VkResult propertiesResult = instHelper.vki.getPhysicalDeviceImageFormatProperties(devHelper.physicalDevice,
+																								curParams.imageFormat,
+																								VK_IMAGE_TYPE_2D,
+																								VK_IMAGE_TILING_OPTIMAL,
+																								curParams.imageUsage,
+																								0, // flags
+																								&properties);
+
+		log << TestLog::Message << subcase.str()
+			<< "vkGetPhysicalDeviceImageFormatProperties => "
+			<< getResultStr(propertiesResult) << TestLog::EndMessage;
+
+		switch (propertiesResult) {
+		case VK_SUCCESS:
+			{
+				const Unique<VkSwapchainKHR>	swapchain	(createSwapchainKHR(devHelper.vkd, *devHelper.device, &curParams));
+			}
+			log << TestLog::Message << subcase.str()
+				<< "Creating swapchain succeeeded" << TestLog::EndMessage;
+			break;
+		case VK_ERROR_FORMAT_NOT_SUPPORTED:
+			log << TestLog::Message << subcase.str()
+				<< "Skip because vkGetPhysicalDeviceImageFormatProperties returned VK_ERROR_FORMAT_NOT_SUPPORTED" << TestLog::EndMessage;
+			break;
+		default:
+			log << TestLog::Message << subcase.str()
+				<< "Fail because vkGetPhysicalDeviceImageFormatProperties returned "
+				<< getResultStr(propertiesResult) << TestLog::EndMessage;
+			return tcu::TestStatus::fail("Unexpected result from vkGetPhysicalDeviceImageFormatProperties");
 		}
 	}
 
-	return tcu::TestStatus::pass("Creating swapchain succeeded");
+	return tcu::TestStatus::pass("No sub-case failed");
 }
 
 tcu::TestStatus createSwapchainSimulateOOMTest (Context& context, TestParameters params)
@@ -653,9 +706,9 @@ tcu::TestStatus createSwapchainSimulateOOMTest (Context& context, TestParameters
 				else if (numPassingAllocs == maxAllocs)
 					results.addResult(QP_TEST_RESULT_QUALITY_WARNING, "Creating swapchain did not succeed, callback limit exceeded");
 			}
-		}
 
-		context.getTestContext().touchWatchdog();
+			context.getTestContext().touchWatchdog();
+		}
 	}
 
 	if (!validateAndLog(log, allocationRecorder, 0u))
@@ -751,6 +804,13 @@ public:
 	void							recordFrame			(VkCommandBuffer			cmdBuffer,
 														 deUint32					imageNdx,
 														 deUint32					frameNdx) const;
+
+	void							recordDeviceGroupFrame (VkCommandBuffer			cmdBuffer,
+															deUint32				imageNdx,
+															deUint32				firstDeviceID,
+															deUint32				secondDeviceID,
+															deUint32				devicesCount,
+															deUint32				frameNdx) const;
 
 	static void						getPrograms			(SourceCollections& dst);
 
@@ -905,198 +965,20 @@ Move<VkPipeline> TriangleRenderer::createPipeline (const DeviceInterface&	vkd,
 	//		 and can be deleted immediately following that call.
 	const Unique<VkShaderModule>					vertShaderModule		(createShaderModule(vkd, device, binaryCollection.get("tri-vert"), 0));
 	const Unique<VkShaderModule>					fragShaderModule		(createShaderModule(vkd, device, binaryCollection.get("tri-frag"), 0));
+	const std::vector<VkViewport>					viewports				(1, makeViewport(renderSize));
+	const std::vector<VkRect2D>						scissors				(1, makeRect2D(renderSize));
 
-	const VkSpecializationInfo						emptyShaderSpecParams	=
-	{
-		0u,											// mapEntryCount
-		DE_NULL,									// pMap
-		0,											// dataSize
-		DE_NULL,									// pData
-	};
-	const VkPipelineShaderStageCreateInfo			shaderStageParams[]		=
-	{
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-			DE_NULL,
-			(VkPipelineShaderStageCreateFlags)0,
-			VK_SHADER_STAGE_VERTEX_BIT,
-			*vertShaderModule,
-			"main",
-			&emptyShaderSpecParams,
-		},
-		{
-			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-			DE_NULL,
-			(VkPipelineShaderStageCreateFlags)0,
-			VK_SHADER_STAGE_FRAGMENT_BIT,
-			*fragShaderModule,
-			"main",
-			&emptyShaderSpecParams,
-		}
-	};
-	const VkPipelineDepthStencilStateCreateInfo		depthStencilParams		=
-	{
-		VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-		DE_NULL,
-		(VkPipelineDepthStencilStateCreateFlags)0,
-		DE_FALSE,									// depthTestEnable
-		DE_FALSE,									// depthWriteEnable
-		VK_COMPARE_OP_ALWAYS,						// depthCompareOp
-		DE_FALSE,									// depthBoundsTestEnable
-		DE_FALSE,									// stencilTestEnable
-		{
-			VK_STENCIL_OP_KEEP,							// failOp
-			VK_STENCIL_OP_KEEP,							// passOp
-			VK_STENCIL_OP_KEEP,							// depthFailOp
-			VK_COMPARE_OP_ALWAYS,						// compareOp
-			0u,											// compareMask
-			0u,											// writeMask
-			0u,											// reference
-		},											// front
-		{
-			VK_STENCIL_OP_KEEP,							// failOp
-			VK_STENCIL_OP_KEEP,							// passOp
-			VK_STENCIL_OP_KEEP,							// depthFailOp
-			VK_COMPARE_OP_ALWAYS,						// compareOp
-			0u,											// compareMask
-			0u,											// writeMask
-			0u,											// reference
-		},											// back
-		-1.0f,										// minDepthBounds
-		+1.0f,										// maxDepthBounds
-	};
-	const VkViewport								viewport0				=
-	{
-		0.0f,										// x
-		0.0f,										// y
-		(float)renderSize.x(),						// width
-		(float)renderSize.y(),						// height
-		0.0f,										// minDepth
-		1.0f,										// maxDepth
-	};
-	const VkRect2D									scissor0				=
-	{
-		{ 0u, 0u, },								// offset
-		{ renderSize.x(), renderSize.y() },			// extent
-	};
-	const VkPipelineViewportStateCreateInfo			viewportParams			=
-	{
-		VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-		DE_NULL,
-		(VkPipelineViewportStateCreateFlags)0,
-		1u,
-		&viewport0,
-		1u,
-		&scissor0
-	};
-	const VkPipelineMultisampleStateCreateInfo		multisampleParams		=
-	{
-		VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-		DE_NULL,
-		(VkPipelineMultisampleStateCreateFlags)0,
-		VK_SAMPLE_COUNT_1_BIT,						// rasterizationSamples
-		VK_FALSE,									// sampleShadingEnable
-		0.0f,										// minSampleShading
-		(const VkSampleMask*)DE_NULL,				// sampleMask
-		VK_FALSE,									// alphaToCoverageEnable
-		VK_FALSE,									// alphaToOneEnable
-	};
-	const VkPipelineRasterizationStateCreateInfo	rasterParams			=
-	{
-		VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-		DE_NULL,
-		(VkPipelineRasterizationStateCreateFlags)0,
-		VK_FALSE,									// depthClampEnable
-		VK_FALSE,									// rasterizerDiscardEnable
-		VK_POLYGON_MODE_FILL,						// polygonMode
-		VK_CULL_MODE_NONE,							// cullMode
-		VK_FRONT_FACE_COUNTER_CLOCKWISE,			// frontFace
-		VK_FALSE,									// depthBiasEnable
-		0.0f,										// depthBiasConstantFactor
-		0.0f,										// depthBiasClamp
-		0.0f,										// depthBiasSlopeFactor
-		1.0f,										// lineWidth
-	};
-	const VkPipelineInputAssemblyStateCreateInfo	inputAssemblyParams		=
-	{
-		VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-		DE_NULL,
-		(VkPipelineInputAssemblyStateCreateFlags)0,
-		VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-		DE_FALSE,									// primitiveRestartEnable
-	};
-	const VkVertexInputBindingDescription			vertexBinding0			=
-	{
-		0u,											// binding
-		(deUint32)sizeof(tcu::Vec4),				// stride
-		VK_VERTEX_INPUT_RATE_VERTEX,				// inputRate
-	};
-	const VkVertexInputAttributeDescription			vertexAttrib0			=
-	{
-		0u,											// location
-		0u,											// binding
-		VK_FORMAT_R32G32B32A32_SFLOAT,				// format
-		0u,											// offset
-	};
-	const VkPipelineVertexInputStateCreateInfo		vertexInputStateParams	=
-	{
-		VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-		DE_NULL,
-		(VkPipelineVertexInputStateCreateFlags)0,
-		1u,
-		&vertexBinding0,
-		1u,
-		&vertexAttrib0,
-	};
-	const VkPipelineColorBlendAttachmentState		attBlendParams0			=
-	{
-		VK_FALSE,									// blendEnable
-		VK_BLEND_FACTOR_ONE,						// srcColorBlendFactor
-		VK_BLEND_FACTOR_ZERO,						// dstColorBlendFactor
-		VK_BLEND_OP_ADD,							// colorBlendOp
-		VK_BLEND_FACTOR_ONE,						// srcAlphaBlendFactor
-		VK_BLEND_FACTOR_ZERO,						// dstAlphaBlendFactor
-		VK_BLEND_OP_ADD,							// alphaBlendOp
-		(VK_COLOR_COMPONENT_R_BIT|
-		 VK_COLOR_COMPONENT_G_BIT|
-		 VK_COLOR_COMPONENT_B_BIT|
-		 VK_COLOR_COMPONENT_A_BIT),					// colorWriteMask
-	};
-	const VkPipelineColorBlendStateCreateInfo		blendParams				=
-	{
-		VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-		DE_NULL,
-		(VkPipelineColorBlendStateCreateFlags)0,
-		VK_FALSE,									// logicOpEnable
-		VK_LOGIC_OP_COPY,
-		1u,
-		&attBlendParams0,
-		{ 0.0f, 0.0f, 0.0f, 0.0f },					// blendConstants[4]
-	};
-	const VkGraphicsPipelineCreateInfo				pipelineParams			=
-	{
-		VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-		DE_NULL,
-		(VkPipelineCreateFlags)0,
-		(deUint32)DE_LENGTH_OF_ARRAY(shaderStageParams),
-		shaderStageParams,
-		&vertexInputStateParams,
-		&inputAssemblyParams,
-		(const VkPipelineTessellationStateCreateInfo*)DE_NULL,
-		&viewportParams,
-		&rasterParams,
-		&multisampleParams,
-		&depthStencilParams,
-		&blendParams,
-		(const VkPipelineDynamicStateCreateInfo*)DE_NULL,
-		pipelineLayout,
-		renderPass,
-		0u,											// subpass
-		DE_NULL,									// basePipelineHandle
-		0u,											// basePipelineIndex
-	};
-
-	return vk::createGraphicsPipeline(vkd, device, (VkPipelineCache)0, &pipelineParams);
+	return vk::makeGraphicsPipeline(vkd,				// const DeviceInterface&            vk
+									device,				// const VkDevice                    device
+									pipelineLayout,		// const VkPipelineLayout            pipelineLayout
+									*vertShaderModule,	// const VkShaderModule              vertexShaderModule
+									DE_NULL,			// const VkShaderModule              tessellationControlShaderModule
+									DE_NULL,			// const VkShaderModule              tessellationEvalShaderModule
+									DE_NULL,			// const VkShaderModule              geometryShaderModule
+									*fragShaderModule,	// const VkShaderModule              fragmentShaderModule
+									renderPass,			// const VkRenderPass                renderPass
+									viewports,			// const std::vector<VkViewport>&    viewports
+									scissors);			// const std::vector<VkRect2D>&      scissors
 }
 
 Move<VkImageView> TriangleRenderer::createAttachmentView (const DeviceInterface&	vkd,
@@ -1227,31 +1109,80 @@ void TriangleRenderer::recordFrame (VkCommandBuffer	cmdBuffer,
 {
 	const VkFramebuffer	curFramebuffer	= **m_framebuffers[imageNdx];
 
-	{
-		const VkCommandBufferBeginInfo	cmdBufBeginParams	=
-		{
-			VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-			DE_NULL,
-			(VkCommandBufferUsageFlags)0,
-			(const VkCommandBufferInheritanceInfo*)DE_NULL,
-		};
-		VK_CHECK(m_vkd.beginCommandBuffer(cmdBuffer, &cmdBufBeginParams));
-	}
+	beginCommandBuffer(m_vkd, cmdBuffer, 0u);
+
+	beginRenderPass(m_vkd, cmdBuffer, *m_renderPass, curFramebuffer, makeRect2D(0, 0, m_renderSize.x(), m_renderSize.y()), tcu::Vec4(0.125f, 0.25f, 0.75f, 1.0f));
+
+	m_vkd.cmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *m_pipeline);
 
 	{
-		const VkClearValue			clearValue		= makeClearValueColorF32(0.125f, 0.25f, 0.75f, 1.0f);
-		const VkRenderPassBeginInfo	passBeginParams	=
+		const VkDeviceSize bindingOffset = 0;
+		m_vkd.cmdBindVertexBuffers(cmdBuffer, 0u, 1u, &m_vertexBuffer.get(), &bindingOffset);
+	}
+
+	m_vkd.cmdPushConstants(cmdBuffer, *m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0u, (deUint32)sizeof(deUint32), &frameNdx);
+	m_vkd.cmdDraw(cmdBuffer, 3u, 1u, 0u, 0u);
+	endRenderPass(m_vkd, cmdBuffer);
+
+	endCommandBuffer(m_vkd, cmdBuffer);
+}
+
+void TriangleRenderer::recordDeviceGroupFrame (VkCommandBuffer	cmdBuffer,
+											   deUint32			firstDeviceID,
+											   deUint32			secondDeviceID,
+											   deUint32			devicesCount,
+											   deUint32			imageNdx,
+											   deUint32			frameNdx) const
+{
+	const VkFramebuffer	curFramebuffer	= **m_framebuffers[imageNdx];
+
+	beginCommandBuffer(m_vkd, cmdBuffer, 0u);
+
+	// begin renderpass
+	{
+		const VkClearValue clearValue = makeClearValueColorF32(0.125f, 0.25f, 0.75f, 1.0f);
+
+		VkRect2D zeroRect = { { 0, 0, },{ 0, 0, } };
+		vector<VkRect2D> renderAreas;
+		for (deUint32 i = 0; i < devicesCount; i++)
+			renderAreas.push_back(zeroRect);
+
+		// Render completely if there is only 1 device
+		if (devicesCount == 1u)
 		{
-			VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+			renderAreas[0].extent.width = (deInt32)m_renderSize.x();
+			renderAreas[0].extent.height = (deInt32)m_renderSize.y();
+		}
+		else
+		{
+			// Split into 2 vertical halves
+			renderAreas[firstDeviceID].extent.width		= (deInt32)m_renderSize.x() / 2;
+			renderAreas[firstDeviceID].extent.height	= (deInt32)m_renderSize.y();
+			renderAreas[secondDeviceID]					= renderAreas[firstDeviceID];
+			renderAreas[secondDeviceID].offset.x		= (deInt32)m_renderSize.x() / 2;
+		}
+
+		const VkDeviceGroupRenderPassBeginInfo deviceGroupRPBeginInfo =
+		{
+			VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO,
 			DE_NULL,
-			*m_renderPass,
-			curFramebuffer,
+			(deUint32)((1 << devicesCount) - 1),
+			devicesCount,
+			&renderAreas[0]
+		};
+
+		const VkRenderPassBeginInfo passBeginParams =
+		{
+			VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,						// sType
+			&deviceGroupRPBeginInfo,										// pNext
+			*m_renderPass,													// renderPass
+			curFramebuffer,													// framebuffer
 			{
 				{ 0, 0 },
-				{ (deUint32)m_renderSize.x(), (deUint32)m_renderSize.y() }
-			},													// renderArea
-			1u,													// clearValueCount
-			&clearValue,										// pClearValues
+				{ m_renderSize.x(), m_renderSize.y() }
+			},																// renderArea
+			1u,																// clearValueCount
+			&clearValue,													// pClearValues
 		};
 		m_vkd.cmdBeginRenderPass(cmdBuffer, &passBeginParams, VK_SUBPASS_CONTENTS_INLINE);
 	}
@@ -1265,9 +1196,9 @@ void TriangleRenderer::recordFrame (VkCommandBuffer	cmdBuffer,
 
 	m_vkd.cmdPushConstants(cmdBuffer, *m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0u, (deUint32)sizeof(deUint32), &frameNdx);
 	m_vkd.cmdDraw(cmdBuffer, 3u, 1u, 0u, 0u);
-	m_vkd.cmdEndRenderPass(cmdBuffer);
+	endRenderPass(m_vkd, cmdBuffer);
 
-	VK_CHECK(m_vkd.endCommandBuffer(cmdBuffer));
+	endCommandBuffer(m_vkd, cmdBuffer);
 }
 
 void TriangleRenderer::getPrograms (SourceCollections& dst)
@@ -1338,6 +1269,92 @@ vector<CommandBufferSp> allocateCommandBuffers (const DeviceInterface&		vkd,
 	return buffers;
 }
 
+class AcquireNextImageWrapper
+{
+public:
+
+	AcquireNextImageWrapper(const DeviceInterface&	vkd,
+							VkDevice				device,
+							deUint32				deviceMask,
+							VkSwapchainKHR			swapchain,
+							deUint64				timeout)
+		: m_vkd			(vkd)
+		, m_device		(device)
+		, m_swapchain	(swapchain)
+		, m_timeout		(timeout)
+	{
+		DE_UNREF(deviceMask);	// needed for compatibility with acquireNextImage2KHR
+	}
+
+	bool featureAvailable(const deUint32 deviceVersion, const Extensions& supportedExtensions)
+	{
+		DE_UNREF(deviceVersion);
+		DE_UNREF(supportedExtensions);
+		return true;			// needed for compatibility with acquireNextImage2KHR
+	}
+
+	VkResult call(VkSemaphore semaphore, VkFence fence, deUint32* imageIndex)
+	{
+		return m_vkd.acquireNextImageKHR(m_device,
+										 m_swapchain,
+										 m_timeout,
+										 semaphore,
+										 fence,
+										 imageIndex);
+	}
+
+protected:
+
+	const DeviceInterface&	m_vkd;
+	VkDevice				m_device;
+	VkSwapchainKHR			m_swapchain;
+	deUint64				m_timeout;
+};
+
+class AcquireNextImage2Wrapper
+{
+public:
+
+	AcquireNextImage2Wrapper(const DeviceInterface&	vkd,
+							 VkDevice				device,
+							 deUint32				deviceMask,
+							 VkSwapchainKHR			swapchain,
+							 deUint64				timeout)
+		: m_vkd		(vkd)
+		, m_device	(device)
+	{
+		m_info.sType		= VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR;
+		m_info.pNext		= DE_NULL;
+		m_info.swapchain	= swapchain;
+		m_info.timeout		= timeout;
+		m_info.semaphore	= DE_NULL;
+		m_info.fence		= DE_NULL;
+		m_info.deviceMask	= deviceMask;
+	}
+
+	bool featureAvailable(const deUint32 deviceVersion, const Extensions& supportedExtensions)
+	{
+		return isDeviceExtensionSupported(deviceVersion, supportedExtensions, RequiredExtension("VK_KHR_device_group"));
+	}
+
+	VkResult call(VkSemaphore semaphore, VkFence fence, deUint32* imageIndex)
+	{
+		m_info.semaphore	= semaphore;
+		m_info.fence		= fence;
+		return m_vkd.acquireNextImage2KHR(m_device,
+										  &m_info,
+										  imageIndex);
+	}
+
+protected:
+
+	const DeviceInterface&		m_vkd;
+	VkDevice					m_device;
+	VkAcquireNextImageInfoKHR	m_info;
+};
+
+
+template <typename AcquireWrapperType>
 tcu::TestStatus basicRenderTest (Context& context, Type wsiType)
 {
 	const tcu::UVec2				desiredSize					(256, 256);
@@ -1352,6 +1369,10 @@ tcu::TestStatus basicRenderTest (Context& context, Type wsiType)
 	const Unique<VkSwapchainKHR>	swapchain					(createSwapchainKHR(vkd, device, &swapchainInfo));
 	const vector<VkImage>			swapchainImages				= getSwapchainImages(vkd, device, *swapchain);
 
+	AcquireWrapperType acquireImageWrapper(vkd, device, 0xFFFFFFFF, *swapchain, std::numeric_limits<deUint64>::max());
+	if (!acquireImageWrapper.featureAvailable(context.getUsedApiVersion(), instHelper.supportedExtensions))
+		TCU_THROW(NotSupportedError, "Required extension is not supported");
+
 	const TriangleRenderer			renderer					(vkd,
 																 device,
 																 allocator,
@@ -1364,7 +1385,7 @@ tcu::TestStatus basicRenderTest (Context& context, Type wsiType)
 
 	const size_t					maxQueuedFrames				= swapchainImages.size()*2;
 
-	// We need to keep hold of fences from vkAcquireNextImageKHR to actually
+	// We need to keep hold of fences from vkAcquireNextImage(2)KHR to actually
 	// limit number of frames we allow to be queued.
 	const vector<FenceSp>			imageReadyFences			(createFences(vkd, device, maxQueuedFrames));
 
@@ -1394,12 +1415,7 @@ tcu::TestStatus basicRenderTest (Context& context, Type wsiType)
 			VK_CHECK(vkd.resetFences(device, 1, &imageReadyFence));
 
 			{
-				const VkResult	acquireResult	= vkd.acquireNextImageKHR(device,
-																		  *swapchain,
-																		  std::numeric_limits<deUint64>::max(),
-																		  imageReadySemaphore,
-																		  imageReadyFence,
-																		  &imageNdx);
+				const VkResult	acquireResult	= acquireImageWrapper.call(imageReadySemaphore, (VkFence)0, &imageNdx);
 
 				if (acquireResult == VK_SUBOPTIMAL_KHR)
 					context.getTestContext().getLog() << TestLog::Message << "Got " << acquireResult << " at frame " << frameNdx << TestLog::EndMessage;
@@ -1438,7 +1454,7 @@ tcu::TestStatus basicRenderTest (Context& context, Type wsiType)
 				};
 
 				renderer.recordFrame(commandBuffer, imageNdx, frameNdx);
-				VK_CHECK(vkd.queueSubmit(devHelper.queue, 1u, &submitInfo, (VkFence)0));
+				VK_CHECK(vkd.queueSubmit(devHelper.queue, 1u, &submitInfo, imageReadyFence));
 				VK_CHECK(vkd.queuePresentKHR(devHelper.queue, &presentInfo));
 			}
 		}
@@ -1449,6 +1465,229 @@ tcu::TestStatus basicRenderTest (Context& context, Type wsiType)
 	{
 		// Make sure device is idle before destroying resources
 		vkd.deviceWaitIdle(device);
+		throw;
+	}
+
+	return tcu::TestStatus::pass("Rendering tests succeeded");
+}
+
+tcu::TestStatus deviceGroupRenderTest (Context& context, Type wsiType)
+{
+	const InstanceHelper		instHelper			(context, wsiType, vector<string>(1, string("VK_KHR_device_group_creation")));
+	const tcu::CommandLine&		cmdLine				= context.getTestContext().getCommandLine();
+	VkPhysicalDevice			physicalDevice		= chooseDevice(instHelper.vki, *instHelper.instance, cmdLine);
+	const Extensions&			supportedExtensions	= enumerateDeviceExtensionProperties(instHelper.vki, physicalDevice, DE_NULL);
+
+	std::vector<const char*> deviceExtensions;
+	deviceExtensions.push_back("VK_KHR_swapchain");
+	if (!isCoreDeviceExtension(context.getUsedApiVersion(), "VK_KHR_device_group"))
+		deviceExtensions.push_back("VK_KHR_device_group");
+
+	for (std::size_t ndx = 0; ndx < deviceExtensions.size(); ++ndx)
+	{
+		if (!isExtensionSupported(supportedExtensions, RequiredExtension(deviceExtensions[ndx])))
+			TCU_THROW(NotSupportedError, (string(deviceExtensions[ndx]) + " is not supported").c_str());
+	}
+
+	const tcu::UVec2								desiredSize					(256, 256);
+	const NativeObjects								native						(context, instHelper.supportedExtensions, wsiType, tcu::just(desiredSize));
+	const Unique<VkSurfaceKHR>						surface						(createSurface(instHelper.vki, *instHelper.instance, wsiType, *native.display, *native.window));
+
+	const deUint32									devGroupIdx					= cmdLine.getVKDeviceGroupId() - 1;
+	const deUint32									deviceIdx					= context.getTestContext().getCommandLine().getVKDeviceId() - 1u;
+	const vector<VkPhysicalDeviceGroupProperties>	deviceGroupProps			= enumeratePhysicalDeviceGroups(instHelper.vki, *instHelper.instance);
+	deUint32										physicalDevicesInGroupCount	= deviceGroupProps[devGroupIdx].physicalDeviceCount;
+	const VkPhysicalDevice*							physicalDevicesInGroup		= deviceGroupProps[devGroupIdx].physicalDevices;
+	deUint32										queueFamilyIndex			= chooseQueueFamilyIndex(instHelper.vki, physicalDevicesInGroup[deviceIdx], *surface);
+	const std::vector<VkQueueFamilyProperties>		queueProps					= getPhysicalDeviceQueueFamilyProperties(instHelper.vki, physicalDevicesInGroup[deviceIdx]);
+	const float										queuePriority				= 1.0f;
+	const deUint32									firstDeviceID				= 0;
+	const deUint32									secondDeviceID				= 1;
+
+	// create a device group
+	const VkDeviceGroupDeviceCreateInfo groupDeviceInfo =
+	{
+		VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO_KHR,			// stype
+		DE_NULL,														// pNext
+		physicalDevicesInGroupCount,									// physicalDeviceCount
+		physicalDevicesInGroup											// physicalDevices
+	};
+	const VkDeviceQueueCreateInfo deviceQueueCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,						// type
+		DE_NULL,														// pNext
+		(VkDeviceQueueCreateFlags)0u,									// flags
+		queueFamilyIndex,												// queueFamilyIndex
+		1u,																// queueCount
+		&queuePriority,													// pQueuePriorities
+	};
+	const VkDeviceCreateInfo deviceCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,							// sType
+		&groupDeviceInfo,												// pNext
+		(VkDeviceCreateFlags)0u,										// flags
+		1,																// queueRecordCount
+		&deviceQueueCreateInfo,											// pRequestedQueues
+		0,																// layerCount
+		DE_NULL,														// ppEnabledLayerNames
+		deUint32(deviceExtensions.size()),								// enabledExtensionCount
+		&deviceExtensions[0],											// ppEnabledExtensionNames
+		DE_NULL,														// pEnabledFeatures
+	};
+	Move<VkDevice>					groupDevice					= createDevice(context.getPlatformInterface(), *instHelper.instance, instHelper.vki, physicalDevicesInGroup[deviceIdx], &deviceCreateInfo);
+	const DeviceDriver				vkd							(context.getPlatformInterface(), *instHelper.instance, *groupDevice);
+	VkQueue							queue						(getDeviceQueue(vkd, *groupDevice, queueFamilyIndex, 0));
+	SimpleAllocator					allocator					(vkd, *groupDevice, getPhysicalDeviceMemoryProperties(instHelper.vki, physicalDevicesInGroup[deviceIdx]));
+
+	// create swapchain for device group
+	struct VkDeviceGroupSwapchainCreateInfoKHR deviceGroupSwapchainInfo =
+	{
+		VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR,
+		DE_NULL,
+		VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR
+	};
+	VkSwapchainCreateInfoKHR swapchainInfo = getBasicSwapchainParameters(wsiType,
+																		 instHelper.vki,
+																		 physicalDevicesInGroup[deviceIdx],
+																		 *surface,
+																		 desiredSize,
+																		 2);
+	swapchainInfo.pNext = &deviceGroupSwapchainInfo;
+
+	const Unique<VkSwapchainKHR>	swapchain					(createSwapchainKHR(vkd, *groupDevice, &swapchainInfo));
+	const vector<VkImage>			swapchainImages				= getSwapchainImages(vkd, *groupDevice, *swapchain);
+
+	const TriangleRenderer			renderer					(vkd,
+																 *groupDevice,
+																 allocator,
+																 context.getBinaryCollection(),
+																 swapchainImages,
+																 swapchainInfo.imageFormat,
+																 tcu::UVec2(swapchainInfo.imageExtent.width, swapchainInfo.imageExtent.height));
+
+	const Unique<VkCommandPool>		commandPool					(createCommandPool(vkd, *groupDevice, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, queueFamilyIndex));
+
+	const size_t					maxQueuedFrames				= swapchainImages.size()*2;
+
+	// We need to keep hold of fences from vkAcquireNextImage2KHR
+	// to actually limit number of frames we allow to be queued.
+	const vector<FenceSp>			imageReadyFences			(createFences(vkd, *groupDevice, maxQueuedFrames));
+
+	// We need maxQueuedFrames+1 for imageReadySemaphores pool as we need to
+	// pass the semaphore in same time as the fence we use to meter rendering.
+	const vector<SemaphoreSp>		imageReadySemaphores		(createSemaphores(vkd, *groupDevice, maxQueuedFrames+1));
+
+	// For rest we simply need maxQueuedFrames as we will wait for image from frameNdx-maxQueuedFrames
+	// to become available to us, guaranteeing that previous uses must have completed.
+	const vector<SemaphoreSp>		renderingCompleteSemaphores	(createSemaphores(vkd, *groupDevice, maxQueuedFrames));
+	const vector<CommandBufferSp>	commandBuffers				(allocateCommandBuffers(vkd, *groupDevice, *commandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, maxQueuedFrames));
+
+	try
+	{
+		const deUint32	numFramesToRender = 60*10;
+
+		for (deUint32 frameNdx = 0; frameNdx < numFramesToRender; ++frameNdx)
+		{
+			const VkFence		imageReadyFence		= **imageReadyFences[frameNdx%imageReadyFences.size()];
+			const VkSemaphore	imageReadySemaphore	= **imageReadySemaphores[frameNdx%imageReadySemaphores.size()];
+			deUint32			imageNdx			= ~0u;
+
+			if (frameNdx >= maxQueuedFrames)
+				VK_CHECK(vkd.waitForFences(*groupDevice, 1u, &imageReadyFence, VK_TRUE, std::numeric_limits<deUint64>::max()));
+
+			VK_CHECK(vkd.resetFences(*groupDevice, 1, &imageReadyFence));
+
+			{
+				VkAcquireNextImageInfoKHR acquireNextImageInfo =
+				{
+					VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR,
+					DE_NULL,
+					*swapchain,
+					std::numeric_limits<deUint64>::max(),
+					imageReadySemaphore,
+					(VkFence)0,
+					(1 << firstDeviceID)
+				};
+
+				const VkResult acquireResult = vkd.acquireNextImage2KHR(*groupDevice, &acquireNextImageInfo, &imageNdx);
+
+				if (acquireResult == VK_SUBOPTIMAL_KHR)
+					context.getTestContext().getLog() << TestLog::Message << "Got " << acquireResult << " at frame " << frameNdx << TestLog::EndMessage;
+				else
+					VK_CHECK(acquireResult);
+			}
+
+			TCU_CHECK((size_t)imageNdx < swapchainImages.size());
+
+			{
+				const VkSemaphore			renderingCompleteSemaphore	= **renderingCompleteSemaphores[frameNdx%renderingCompleteSemaphores.size()];
+				const VkCommandBuffer		commandBuffer				= **commandBuffers[frameNdx%commandBuffers.size()];
+				const VkPipelineStageFlags	waitDstStage				= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+				// render triangle using one or two subdevices when available
+				renderer.recordDeviceGroupFrame(commandBuffer, firstDeviceID, secondDeviceID, physicalDevicesInGroupCount, imageNdx, frameNdx);
+
+				// submit queue
+				deUint32 deviceMask = (1 << firstDeviceID) | (1 << secondDeviceID);
+				std::vector<deUint32> deviceIndices(1, firstDeviceID);
+				if (physicalDevicesInGroupCount > 1)
+					deviceIndices.push_back(secondDeviceID);
+				const VkDeviceGroupSubmitInfo deviceGroupSubmitInfo =
+				{
+					VK_STRUCTURE_TYPE_DEVICE_GROUP_SUBMIT_INFO_KHR,		// sType
+					DE_NULL,											// pNext
+					deUint32(deviceIndices.size()),						// waitSemaphoreCount
+					&deviceIndices[0],									// pWaitSemaphoreDeviceIndices
+					1u,													// commandBufferCount
+					&deviceMask,										// pCommandBufferDeviceMasks
+					deUint32(deviceIndices.size()),						// signalSemaphoreCount
+					&deviceIndices[0],									// pSignalSemaphoreDeviceIndices
+				};
+				const VkSubmitInfo submitInfo =
+				{
+					VK_STRUCTURE_TYPE_SUBMIT_INFO,						// sType
+					&deviceGroupSubmitInfo,								// pNext
+					1u,													// waitSemaphoreCount
+					&imageReadySemaphore,								// pWaitSemaphores
+					&waitDstStage,										// pWaitDstStageMask
+					1u,													// commandBufferCount
+					&commandBuffer,										// pCommandBuffers
+					1u,													// signalSemaphoreCount
+					&renderingCompleteSemaphore,						// pSignalSemaphores
+				};
+				VK_CHECK(vkd.queueSubmit(queue, 1u, &submitInfo, imageReadyFence));
+
+				// present swapchain image
+				deviceMask = (1 << firstDeviceID);
+				const VkDeviceGroupPresentInfoKHR deviceGroupPresentInfo =
+				{
+					VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR,
+					DE_NULL,
+					1u,
+					&deviceMask,
+					VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR,
+				};
+				const VkPresentInfoKHR presentInfo =
+				{
+					VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+					&deviceGroupPresentInfo,
+					1u,
+					&renderingCompleteSemaphore,
+					1u,
+					&*swapchain,
+					&imageNdx,
+					(VkResult*)DE_NULL
+				};
+				VK_CHECK(vkd.queuePresentKHR(queue, &presentInfo));
+			}
+		}
+
+		VK_CHECK(vkd.deviceWaitIdle(*groupDevice));
+	}
+	catch (...)
+	{
+		// Make sure device is idle before destroying resources
+		vkd.deviceWaitIdle(*groupDevice);
 		throw;
 	}
 
@@ -1631,6 +1870,36 @@ tcu::TestStatus getImagesIncompleteResultTest (Context& context, Type wsiType)
 		return tcu::TestStatus::pass("Get swapchain images tests succeeded");
 }
 
+tcu::TestStatus getImagesResultsCountTest (Context& context, Type wsiType)
+{
+	const tcu::UVec2				desiredSize(256, 256);
+	const InstanceHelper			instHelper(context, wsiType);
+	const NativeObjects				native(context, instHelper.supportedExtensions, wsiType, tcu::just(desiredSize));
+	const Unique<VkSurfaceKHR>		surface(createSurface(instHelper.vki, *instHelper.instance, wsiType, *native.display, *native.window));
+	const DeviceHelper				devHelper(context, instHelper.vki, *instHelper.instance, *surface);
+	const VkSwapchainCreateInfoKHR	swapchainInfo = getBasicSwapchainParameters(wsiType, instHelper.vki, devHelper.physicalDevice, *surface, desiredSize, 2);
+	const Unique<VkSwapchainKHR>	swapchain(createSwapchainKHR(devHelper.vkd, *devHelper.device, &swapchainInfo));
+
+	deUint32	numImages = 0;
+
+	VK_CHECK(devHelper.vkd.getSwapchainImagesKHR(*devHelper.device, *swapchain, &numImages, DE_NULL));
+
+	if (numImages > 0)
+	{
+		std::vector<VkImage>	images			(numImages + 1);
+		const deUint32			numImagesOrig	= numImages;
+
+		// check if below call properly overwrites formats count
+		numImages++;
+
+		VK_CHECK(devHelper.vkd.getSwapchainImagesKHR(*devHelper.device, *swapchain, &numImages, &images[0]));
+
+		if ((size_t)numImages != numImagesOrig)
+			TCU_FAIL("Image count changed between calls");
+	}
+	return tcu::TestStatus::pass("Get swapchain images tests succeeded");
+}
+
 tcu::TestStatus destroyNullHandleSwapchainTest (Context& context, Type wsiType)
 {
 	const InstanceHelper		instHelper	(context, wsiType);
@@ -1662,12 +1931,15 @@ void getBasicRenderPrograms (SourceCollections& dst, Type)
 
 void populateRenderGroup (tcu::TestCaseGroup* testGroup, Type wsiType)
 {
-	addFunctionCaseWithPrograms(testGroup, "basic", "Basic Rendering Test", getBasicRenderPrograms, basicRenderTest, wsiType);
+	addFunctionCaseWithPrograms(testGroup, "basic", "Basic Rendering Test", getBasicRenderPrograms, basicRenderTest<AcquireNextImageWrapper>, wsiType);
+	addFunctionCaseWithPrograms(testGroup, "basic2", "Basic Rendering Test using AcquireNextImage2", getBasicRenderPrograms, basicRenderTest<AcquireNextImage2Wrapper>, wsiType);
+	addFunctionCaseWithPrograms(testGroup, "device_group", "Basic Rendering Test using device_group", getBasicRenderPrograms, deviceGroupRenderTest, wsiType);
 }
 
 void populateGetImagesGroup (tcu::TestCaseGroup* testGroup, Type wsiType)
 {
 	addFunctionCase(testGroup, "incomplete", "Test VK_INCOMPLETE return code", getImagesIncompleteResultTest, wsiType);
+	addFunctionCase(testGroup, "count",	"Test proper count of images", getImagesResultsCountTest, wsiType);
 }
 
 void populateModifyGroup (tcu::TestCaseGroup* testGroup, Type wsiType)

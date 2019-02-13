@@ -1276,17 +1276,18 @@ std::string ComputeShaderGeneratedCase::genComputeSource (bool computeCmd, bool 
 			buf	<< "    if (gl_GlobalInvocationID.x < gridSize && gl_GlobalInvocationID.y < gridSize && gl_GlobalInvocationID.z == 0u) {\n"
 				<< "        uint        y           = gl_GlobalInvocationID.x;\n"
 				<< "        uint        x           = gl_GlobalInvocationID.y;\n"
-				<< "        float       posX        = (float(x) / float(gridSize)) * 2.0 - 1.0;\n"
-				<< "        float       posY        = (float(y) / float(gridSize)) * 2.0 - 1.0;\n"
-				<< "        const float cellSize    = 2.0 / float(gridSize);\n"
+				<< "        float       posX        = (float(x)    / float(gridSize)) * 2.0 - 1.0;\n"
+				<< "        float       posXp1      = (float(x+1u) / float(gridSize)) * 2.0 - 1.0;\n"
+				<< "        float       posY        = (float(y)    / float(gridSize)) * 2.0 - 1.0;\n"
+				<< "        float       posYp1      = (float(y+1u) / float(gridSize)) * 2.0 - 1.0;\n"
 				<< "        vec4        color       = ((x + y)%2u != 0u) ? (yellow) : (green);\n"
 				<< "\n"
-				<< "        attribs[((y * gridSize + x) * 6u + 0u) * 2u + 0u] = vec4(posX,            posY,            0.0, 1.0);\n"
-				<< "        attribs[((y * gridSize + x) * 6u + 1u) * 2u + 0u] = vec4(posX + cellSize, posY,            0.0, 1.0);\n"
-				<< "        attribs[((y * gridSize + x) * 6u + 2u) * 2u + 0u] = vec4(posX + cellSize, posY + cellSize, 0.0, 1.0);\n"
-				<< "        attribs[((y * gridSize + x) * 6u + 3u) * 2u + 0u] = vec4(posX,            posY,            0.0, 1.0);\n"
-				<< "        attribs[((y * gridSize + x) * 6u + 4u) * 2u + 0u] = vec4(posX + cellSize, posY + cellSize, 0.0, 1.0);\n"
-				<< "        attribs[((y * gridSize + x) * 6u + 5u) * 2u + 0u] = vec4(posX,            posY + cellSize, 0.0, 1.0);\n"
+				<< "        attribs[((y * gridSize + x) * 6u + 0u) * 2u + 0u] = vec4(posX,   posY,   0.0, 1.0);\n"
+				<< "        attribs[((y * gridSize + x) * 6u + 1u) * 2u + 0u] = vec4(posXp1, posY,   0.0, 1.0);\n"
+				<< "        attribs[((y * gridSize + x) * 6u + 2u) * 2u + 0u] = vec4(posXp1, posYp1, 0.0, 1.0);\n"
+				<< "        attribs[((y * gridSize + x) * 6u + 3u) * 2u + 0u] = vec4(posX,   posY,   0.0, 1.0);\n"
+				<< "        attribs[((y * gridSize + x) * 6u + 4u) * 2u + 0u] = vec4(posXp1, posYp1, 0.0, 1.0);\n"
+				<< "        attribs[((y * gridSize + x) * 6u + 5u) * 2u + 0u] = vec4(posX,   posYp1, 0.0, 1.0);\n"
 				<< "\n"
 				<< "        attribs[((y * gridSize + x) * 6u + 0u) * 2u + 1u] = color;\n"
 				<< "        attribs[((y * gridSize + x) * 6u + 1u) * 2u + 1u] = color;\n"
@@ -1503,7 +1504,7 @@ void ComputeShaderGeneratedCase::renderTo (tcu::Surface& dst)
 
 	gl.bindBuffer(GL_ARRAY_BUFFER, m_dataBufferID);
 	gl.vertexAttribPointer(positionLoc, 4, GL_FLOAT, GL_FALSE, 8 * (int)sizeof(float), DE_NULL);
-	gl.vertexAttribPointer(colorLoc,    4, GL_FLOAT, GL_FALSE, 8 * (int)sizeof(float), ((const deUint8*)DE_NULL) + 4*sizeof(float));
+	gl.vertexAttribPointer(colorLoc,    4, GL_FLOAT, GL_FALSE, 8 * (int)sizeof(float), glu::BufferOffsetAsPointer(4*sizeof(float)));
 	gl.enableVertexAttribArray(positionLoc);
 	gl.enableVertexAttribArray(colorLoc);
 
@@ -1524,7 +1525,7 @@ void ComputeShaderGeneratedCase::renderTo (tcu::Surface& dst)
 	gl.useProgram(m_shaderProgram->getProgram());
 	for (int drawCmdNdx = 0; drawCmdNdx < m_numDrawCmds; ++drawCmdNdx)
 	{
-		const void* offset = ((deUint8*)DE_NULL) + drawCmdNdx*m_commandSize;
+		const void* offset = glu::BufferOffsetAsPointer(drawCmdNdx*m_commandSize);
 
 		if (m_drawMethod == DRAWMETHOD_DRAWELEMENTS)
 			gl.drawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, offset);

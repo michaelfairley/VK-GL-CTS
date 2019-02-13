@@ -42,6 +42,11 @@ PlatformDriver::~PlatformDriver (void)
 
 InstanceDriver::InstanceDriver (const PlatformInterface& platformInterface, VkInstance instance)
 {
+	loadFunctions(platformInterface, instance);
+}
+
+void InstanceDriver::loadFunctions (const PlatformInterface& platformInterface, VkInstance instance)
+{
 #define GET_PROC_ADDR(NAME) platformInterface.getInstanceProcAddr(instance, NAME)
 #include "vkInitInstanceFunctionPointers.inl"
 #undef GET_PROC_ADDR
@@ -51,9 +56,11 @@ InstanceDriver::~InstanceDriver (void)
 {
 }
 
-DeviceDriver::DeviceDriver (const InstanceInterface& instanceInterface, VkDevice device)
+DeviceDriver::DeviceDriver(const PlatformInterface& platformInterface, VkInstance instance, VkDevice device)
 {
-#define GET_PROC_ADDR(NAME) instanceInterface.getDeviceProcAddr(device, NAME)
+	m_vk.getDeviceProcAddr = (GetDeviceProcAddrFunc)platformInterface.getInstanceProcAddr(instance, "vkGetDeviceProcAddr");
+
+#define GET_PROC_ADDR(NAME) m_vk.getDeviceProcAddr(device, NAME)
 #include "vkInitDeviceFunctionPointers.inl"
 #undef GET_PROC_ADDR
 }

@@ -13,6 +13,10 @@ set(DEQP_VK_DRAW_SRCS
 	vktDrawInvertedDepthRangesTests.cpp
 	vktDrawShaderDrawParametersTests.hpp
 	vktDrawShaderDrawParametersTests.cpp
+	vktDrawShaderLayerTests.hpp
+	vktDrawShaderLayerTests.cpp
+	vktDrawShaderViewportIndexTests.hpp
+	vktDrawShaderViewportIndexTests.cpp
 	vktDrawSimpleTest.hpp
 	vktDrawSimpleTest.cpp
 	vktDrawNegativeViewportHeightTests.hpp
@@ -28,12 +32,16 @@ set(DEQP_VK_DRAW_SRCS
 	vktDrawTestCaseUtil.hpp
 	vktBasicDrawTests.hpp
 	vktBasicDrawTests.cpp
+	vktDrawDifferingInterpolationTests.hpp
+	vktDrawDifferingInterpolationTests.cpp
 )
 
 set(DEQP_VK_DRAW_LIBS
 	tcutil
 	vkutil
 )
+
+PCH(DEQP_VK_DRAW_SRCS ../pch.cpp)
 
 add_library(deqp-vk-draw STATIC ${DEQP_VK_DRAW_SRCS})
 target_link_libraries(deqp-vk-draw ${DEQP_VK_DRAW_LIBS})

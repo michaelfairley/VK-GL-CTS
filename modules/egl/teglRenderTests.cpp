@@ -141,7 +141,7 @@ static bool isANarrowScreenSpaceTriangle (const tcu::Vec4& p0, const tcu::Vec4& 
 	return visibleArea < minimumVisibleArea;
 }
 
-void randomizeDrawOp (de::Random& rnd, DrawPrimitiveOp& drawOp)
+void randomizeDrawOp (de::Random& rnd, DrawPrimitiveOp& drawOp, const bool alphaZeroOrOne)
 {
 	const int	minStencilRef	= 0;
 	const int	maxStencilRef	= 8;
@@ -173,6 +173,7 @@ void randomizeDrawOp (de::Random& rnd, DrawPrimitiveOp& drawOp)
 		{
 			const float		cx		= rnd.getFloat(-1.0f, 1.0f);
 			const float		cy		= rnd.getFloat(-1.0f, 1.0f);
+			const float		flatAlpha = (rnd.getFloat(minAlpha, maxAlpha) > 0.5f) ? 1.0f : 0.0f;
 
 			for (int coordNdx = 0; coordNdx < 3; coordNdx++)
 			{
@@ -188,11 +189,16 @@ void randomizeDrawOp (de::Random& rnd, DrawPrimitiveOp& drawOp)
 				color.y()		= rnd.getFloat(minRGB, maxRGB);
 				color.z()		= rnd.getFloat(minRGB, maxRGB);
 				color.w()		= rnd.getFloat(minAlpha, maxAlpha);
+
+				if (alphaZeroOrOne)
+				{
+					color.w()	= flatAlpha;
+				}
 			}
 
 			// avoid generating narrow triangles
 			{
-				const int	maxAttempts	= 40;
+				const int	maxAttempts	= 100;
 				int			numAttempts	= 0;
 				tcu::Vec4&	p0			= drawOp.positions[triNdx*3 + 0];
 				tcu::Vec4&	p1			= drawOp.positions[triNdx*3 + 1];
@@ -354,6 +360,37 @@ tcu::TextureFormat getColorFormat (const tcu::PixelFormat& colorBits)
 	}
 
 #undef PACK_FMT
+}
+
+/*
+The getColorThreshold function is used to obtain a
+threshold usable for the fuzzyCompare function.
+
+For 8bit color depths a value of 0.02 should provide
+a good metric for rejecting images above this level.
+For other bit depths other thresholds should be selected.
+Ideally this function would take advantage of the
+getColorThreshold function provided by the PixelFormat class
+as this would also allow setting per channel thresholds.
+However using the PixelFormat provided function can result
+in too strict thresholds for 8bit bit depths (compared to
+the current default of 0.02) or too relaxed for lower bit
+depths if scaled proportionally to the 8bit default.
+*/
+
+float getColorThreshold (const tcu::PixelFormat& colorBits)
+{
+	if ((colorBits.redBits > 0 && colorBits.redBits < 8) ||
+		(colorBits.greenBits > 0 && colorBits.greenBits < 8) ||
+		(colorBits.blueBits > 0 && colorBits.blueBits < 8) ||
+		(colorBits.alphaBits > 0 && colorBits.alphaBits < 8))
+	{
+		return 0.05f;
+	}
+	else
+	{
+		return 0.02f;
+	}
 }
 
 tcu::TextureFormat getDepthFormat (const int depthBits)
@@ -699,9 +736,9 @@ void SingleThreadRenderCase::executeForContexts (EGLDisplay display, EGLSurface 
 	const int				numContexts	= (int)contexts.size();
 	const int				drawsPerCtx	= 2;
 	const int				numIters	= 2;
-	const float				threshold	= 0.02f;
-
 	const tcu::PixelFormat	pixelFmt	= getPixelFormat(egl, display, config.config);
+	const float				threshold	= getColorThreshold(pixelFmt);
+
 	const int				depthBits	= eglu::getConfigAttribInt(egl, display, config.config, EGL_DEPTH_SIZE);
 	const int				stencilBits	= eglu::getConfigAttribInt(egl, display, config.config, EGL_STENCIL_SIZE);
 	const int				numSamples	= eglu::getConfigAttribInt(egl, display, config.config, EGL_SAMPLES);
@@ -727,7 +764,7 @@ void SingleThreadRenderCase::executeForContexts (EGLDisplay display, EGLSurface 
 	// Generate draw ops.
 	drawOps.resize(numContexts*drawsPerCtx*numIters);
 	for (vector<DrawPrimitiveOp>::iterator drawOp = drawOps.begin(); drawOp != drawOps.end(); ++drawOp)
-		randomizeDrawOp(rnd, *drawOp);
+		randomizeDrawOp(rnd, *drawOp, (pixelFmt.alphaBits == 1));
 
 	// Create and setup programs per context
 	for (int ctxNdx = 0; ctxNdx < numContexts; ctxNdx++)
@@ -903,9 +940,9 @@ void MultiThreadRenderCase::executeForContexts (EGLDisplay display, EGLSurface s
 	const int				packetsPerThread	= 2;
 	const int				numThreads			= numContexts;
 	const int				numPackets			= numThreads * packetsPerThread;
-	const float				threshold			= 0.02f;
-
 	const tcu::PixelFormat	pixelFmt			= getPixelFormat(egl, display, config.config);
+	const float				threshold			= getColorThreshold(pixelFmt);
+
 	const int				depthBits			= eglu::getConfigAttribInt(egl, display, config.config, EGL_DEPTH_SIZE);
 	const int				stencilBits			= eglu::getConfigAttribInt(egl, display, config.config, EGL_STENCIL_SIZE);
 	const int				numSamples			= eglu::getConfigAttribInt(egl, display, config.config, EGL_SAMPLES);
@@ -939,7 +976,7 @@ void MultiThreadRenderCase::executeForContexts (EGLDisplay display, EGLSurface s
 
 	// Create draw ops.
 	for (vector<DrawPrimitiveOp>::iterator drawOp = drawOps.begin(); drawOp != drawOps.end(); ++drawOp)
-		randomizeDrawOp(rnd, *drawOp);
+		randomizeDrawOp(rnd, *drawOp, (pixelFmt.alphaBits == 1));
 
 	// Create packets.
 	for (int threadNdx = 0; threadNdx < numThreads; threadNdx++)

@@ -1,13 +1,17 @@
 # dEQP cmake file
 
-cmake_minimum_required(VERSION 2.8)
+# Module FindGit requires cmake >= 2.8.2
+cmake_minimum_required(VERSION 2.8.2)
+
+find_package(Git)
+find_package(PythonInterp 2)
 
 # dEQP Target.
 set(DEQP_TARGET "default" CACHE STRING "dEQP Target (default, android...)")
 
 if (DEFINED DEQP_TARGET_TOOLCHAIN)
 	# \note Toolchain must be included before project() command
-	include(targets/${DEQP_TARGET}/${DEQP_TARGET_TOOLCHAIN}.cmake)
+	include(targets/${DEQP_TARGET}/${DEQP_TARGET_TOOLCHAIN}.cmake NO_POLICY_SCOPE)
 endif ()
 
 project(dEQP-Core-${DEQP_TARGET})
@@ -63,8 +67,14 @@ endif ()
 include_directories(${ZLIB_INCLUDE_PATH})
 
 # libpng
-find_path(PNG_INCLUDE_PATH	png.h)
-find_library(PNG_LIBRARY	png)
+#
+# The FindPNG module defines PNG_INCLUDE_DIRS and PNG_LIBRARIES. But dEQP's
+# CMake files expect the non-standard PNG_INCLUDE_PATH and PNG_LIBRARY. Set the
+# non-standard variables here to retain compatibility with dEQP's existing
+# CMake files.
+include(FindPNG)
+set(PNG_INCLUDE_PATH ${PNG_INCLUDE_DIRS})
+set(PNG_LIBRARY ${PNG_LIBRARIES})
 
 if (NOT PNG_INCLUDE_PATH OR NOT PNG_LIBRARY)
 	message(STATUS "System version of libpng not found, using external/libpng")
@@ -77,6 +87,20 @@ add_subdirectory(external/glslang)
 
 # spirv-tools
 add_subdirectory(external/spirv-tools)
+
+# VkRunner
+add_subdirectory(external/vkrunner)
+include_directories(external/vkrunner/src)
+
+# spirv-headers
+set(SPIRV_INCLUDE_PATH "${PROJECT_SOURCE_DIR}/external/spirv-headers/src/include")
+if (NOT EXISTS ${SPIRV_INCLUDE_PATH})
+	message(FATAL_ERROR "SPIR-V headers not found, please run external/fetch_sources.py")
+endif()
+include_directories(${SPIRV_INCLUDE_PATH})
+
+# RenderDoc API
+include_directories(external/renderdoc/src)
 
 include_directories(${PNG_INCLUDE_PATH})
 
@@ -137,6 +161,18 @@ if (DE_COMPILER_IS_MSC)
 	# Don't nag about std::copy for example
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_SCL_SECURE_NO_WARNINGS")
 endif ()
+
+# Precompiled header macro. Parameters are source file list and filename for pch cpp file.
+macro(PCH SRCS PCHCPP)
+  if(MSVC AND CMAKE_GENERATOR MATCHES "^Visual Studio")
+    set(PCH_NAME "$(IntDir)\\pch.pch")
+    # make source files use/depend on PCH_NAME
+    set_source_files_properties(${${SRCS}} PROPERTIES COMPILE_FLAGS "/Yupch.h /FIpch.h /Fp${PCH_NAME}" OBJECT_DEPENDS "${PCH_NAME}")
+    # make PCHCPP file compile and generate PCH_NAME
+    set_source_files_properties(${PCHCPP} PROPERTIES COMPILE_FLAGS "/Ycpch.h /Fp${PCH_NAME}" OBJECT_OUTPUTS "${PCH_NAME}")
+    list(APPEND ${SRCS} "${PCHCPP}")
+  endif()
+endmacro(PCH)
 
 # delibs projects
 add_subdirectory(framework/delibs/debase)
@@ -281,6 +317,11 @@ if (DE_OS_IS_ANDROID)
 
 	add_library(deqp SHARED ${DEQP_SRCS})
 	target_link_libraries(deqp ${DEQP_LIBS})
+
+	# Separate out the debug information because it's enormous
+	add_custom_command(TARGET deqp POST_BUILD
+		COMMAND ${CMAKE_STRIP} --only-keep-debug -o $<TARGET_FILE:deqp>.debug $<TARGET_FILE:deqp>
+		COMMAND ${CMAKE_STRIP} -g $<TARGET_FILE:deqp>)
 
 	# Needed by OpenGL CTS that defines its own activity but depends on
 	# common Android support code.

@@ -30,6 +30,7 @@
 #include "vkPrograms.hpp"
 #include "vkRefUtil.hpp"
 #include "vktTestCase.hpp"
+#include "vkQueryUtil.hpp"
 
 namespace vkt
 {
@@ -122,6 +123,21 @@ public:
 	{
 		return new BufferViewTestInstance(ctx, m_testCase);
 	}
+	virtual void						checkSupport					(Context&					ctx) const
+	{
+		VkFormatProperties					properties;
+
+		ctx.getInstanceInterface().getPhysicalDeviceFormatProperties(ctx.getPhysicalDevice(), m_testCase.format, &properties);
+		if (!(properties.bufferFeatures & m_testCase.features))
+			TCU_THROW(NotSupportedError, "Format not supported");
+		if (m_testCase.bufferAllocationKind == ALLOCATION_KIND_DEDICATED)
+		{
+			const std::vector<std::string>&		extensions = ctx.getDeviceExtensions();
+			const deBool						isSupported = isDeviceExtensionSupported(ctx.getUsedApiVersion(), extensions, "VK_KHR_dedicated_allocation");
+			if (!isSupported)
+				TCU_THROW(NotSupportedError, "Dedicated allocation not supported");
+		}
+	}
 private:
 	BufferViewCaseParameters			m_testCase;
 };
@@ -195,27 +211,22 @@ tcu::TestStatus BufferDedicatedAllocation::createTestBuffer				(VkDeviceSize				
 																		 Move<VkBuffer>&			testBuffer,
 																		 Move<VkDeviceMemory>&		memory) const
 {
-	const std::vector<std::string>&		extensions						= context.getDeviceExtensions();
-	const deBool						isSupported						= std::find(extensions.begin(), extensions.end(), "VK_KHR_dedicated_allocation") != extensions.end();
-	if (!isSupported)
-		TCU_THROW(NotSupportedError, "Not supported");
-
 	const InstanceInterface&			vkInstance						= context.getInstanceInterface();
 	const VkDevice						vkDevice						= context.getDevice();
 	const VkPhysicalDevice				vkPhysicalDevice				= context.getPhysicalDevice();
 	const DeviceInterface&				vk								= context.getDeviceInterface();
 	const deUint32						queueFamilyIndex				= context.getUniversalQueueFamilyIndex();
 	VkPhysicalDeviceMemoryProperties	memoryProperties;
-	VkMemoryDedicatedRequirementsKHR	dedicatedRequirements			=
+	VkMemoryDedicatedRequirements		dedicatedRequirements			=
 	{
-		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS_KHR,			// VkStructureType		sType;
+		VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS,				// VkStructureType		sType;
 		DE_NULL,														// const void*			pNext;
 		false,															// VkBool32				prefersDedicatedAllocation
 		false															// VkBool32				requiresDedicatedAllocation
 	};
-	VkMemoryRequirements2KHR			memReqs							=
+	VkMemoryRequirements2				memReqs							=
 	{
-		VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2_KHR,					// VkStructureType		sType
+		VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,						// VkStructureType		sType
 		&dedicatedRequirements,											// void*				pNext
 		{0, 0, 0}														// VkMemoryRequirements	memoryRequirements
 	};
@@ -241,14 +252,14 @@ tcu::TestStatus BufferDedicatedAllocation::createTestBuffer				(VkDeviceSize				
 		return tcu::TestStatus::fail("Buffer creation failed! (Error code: " + de::toString(error.getMessage()) + ")");
 	}
 
-	VkBufferMemoryRequirementsInfo2KHR	info							=
+	VkBufferMemoryRequirementsInfo2	info								=
 	{
-		VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2_KHR,		// VkStructureType		sType
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,			// VkStructureType		sType
 		DE_NULL,														// const void*			pNext
 		*testBuffer														// VkBuffer				buffer
 	};
 
-	vk.getBufferMemoryRequirements2KHR(vkDevice, &info, &memReqs);
+	vk.getBufferMemoryRequirements2(vkDevice, &info, &memReqs);
 
 	if (dedicatedRequirements.requiresDedicatedAllocation == VK_TRUE)
 	{
@@ -268,10 +279,8 @@ tcu::TestStatus BufferDedicatedAllocation::createTestBuffer				(VkDeviceSize				
 	vkInstance.getPhysicalDeviceMemoryProperties(vkPhysicalDevice, &memoryProperties);
 
 	const deUint32						heapTypeIndex					= static_cast<deUint32>(deCtz32(memReqs.memoryRequirements.memoryTypeBits));
-	//const VkMemoryType					memoryType						= memoryProperties.memoryTypes[heapTypeIndex];
-	//const VkMemoryHeap					memoryHeap						= memoryProperties.memoryHeaps[memoryType.heapIndex];
 
-	vk.getBufferMemoryRequirements2KHR(vkDevice, &info, &memReqs); // get the proper size requirement
+	vk.getBufferMemoryRequirements2(vkDevice, &info, &memReqs);			// get the proper size requirement
 
 	if (size > memReqs.memoryRequirements.size)
 	{
@@ -284,10 +293,10 @@ tcu::TestStatus BufferDedicatedAllocation::createTestBuffer				(VkDeviceSize				
 		VkResult						result							= VK_ERROR_OUT_OF_HOST_MEMORY;
 		VkDeviceMemory					rawMemory						= DE_NULL;
 
-		vk::VkMemoryDedicatedAllocateInfoKHR
+		vk::VkMemoryDedicatedAllocateInfo
 										dedicatedInfo					=
 		{
-			VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR,		// VkStructureType			sType
+			VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,			// VkStructureType			sType
 			DE_NULL,													// const void*				pNext
 			DE_NULL,													// VkImage					image
 			*testBuffer													// VkBuffer					buffer
@@ -323,11 +332,6 @@ tcu::TestStatus BufferViewTestInstance::iterate							(void)
 	const VkDeviceSize					size							= 3 * 5 * 7 * 64;
 	Move<VkBuffer>						testBuffer;
 	Move<VkDeviceMemory>				testBufferMemory;
-	VkFormatProperties					properties;
-
-	m_context.getInstanceInterface().getPhysicalDeviceFormatProperties(m_context.getPhysicalDevice(), m_testCase.format, &properties);
-	if (!(properties.bufferFeatures & m_testCase.features))
-		TCU_THROW(NotSupportedError, "Format not supported");
 
 	// Create buffer
 	if (m_testCase.bufferAllocationKind == ALLOCATION_KIND_DEDICATED)
@@ -418,21 +422,22 @@ tcu::TestStatus BufferViewTestInstance::iterate							(void)
 
 		for (deUint32 format = vk::VK_FORMAT_UNDEFINED + 1; format < VK_CORE_FORMAT_LAST; format++)
 		{
-			const std::string				formatName		= de::toLower(getFormatName((VkFormat)format)).substr(10);
+			const std::string			formatName						= de::toLower(getFormatName((VkFormat)format)).substr(10);
 			de::MovePtr<tcu::TestCaseGroup>	formatGroup		(new tcu::TestCaseGroup(testCtx, "suballocation", "BufferView Construction Tests for Suballocated Buffer"));
 
-			const std::string				testName		= de::toLower(getFormatName((VkFormat)format)).substr(10);
-			const std::string				testDescription	= "vkBufferView test " + testName;
+			const std::string			testName						= de::toLower(getFormatName((VkFormat)format)).substr(10);
+			const std::string			testDescription					= "vkBufferView test " + testName;
 
 			{
-				const BufferViewCaseParameters	testParams					=
+				const BufferViewCaseParameters
+										testParams						=
 				{
-					static_cast<vk::VkFormat>(format),						// VkFormat					format;
-					0,														// VkDeviceSize				offset;
-					range,													// VkDeviceSize				range;
-					usage[usageNdx],										// VkBufferUsageFlags		usage;
-					feature[usageNdx],										// VkFormatFeatureFlags		flags;
-					static_cast<AllocationKind>(allocationKind)				// AllocationKind			bufferAllocationKind;
+					static_cast<vk::VkFormat>(format),					// VkFormat					format;
+					0,													// VkDeviceSize				offset;
+					range,												// VkDeviceSize				range;
+					usage[usageNdx],									// VkBufferUsageFlags		usage;
+					feature[usageNdx],									// VkFormatFeatureFlags		flags;
+					static_cast<AllocationKind>(allocationKind)			// AllocationKind			bufferAllocationKind;
 				};
 
 				usageGroup->addChild(new BufferViewTestCase(testCtx, testName.c_str(), testDescription.c_str(), testParams));

@@ -23,9 +23,14 @@
  */ /*-------------------------------------------------------------------*/
 
 #include "es3cTestPackage.hpp"
+#include "es3cCopyTexImageConversionsTests.hpp"
+#include "glcAggressiveShaderOptimizationsTests.hpp"
 #include "glcExposedExtensionsTests.hpp"
 #include "glcFragDepthTests.hpp"
 #include "glcInfoTests.hpp"
+#include "glcInternalformatTests.hpp"
+#include "glcPackedDepthStencilTests.hpp"
+#include "glcPackedPixelsTests.hpp"
 #include "glcParallelShaderCompileTests.hpp"
 #include "glcShaderConstExprTests.hpp"
 #include "glcShaderIndexingTests.hpp"
@@ -140,6 +145,7 @@ public:
 		addChild(new deqp::UniformBlockTests(m_context, glu::GLSL_VERSION_300_ES));
 		addChild(new deqp::ShaderIntegerMixTests(m_context, glu::GLSL_VERSION_300_ES));
 		addChild(new deqp::ShaderNegativeTests(m_context, glu::GLSL_VERSION_300_ES));
+		addChild(new glcts::AggressiveShaderOptimizationsTests(m_context));
 	}
 };
 
@@ -167,8 +173,12 @@ void ES30TestPackage::init(void)
 		tcu::TestCaseGroup* coreGroup = new tcu::TestCaseGroup(getTestContext(), "core", "core tests");
 		coreGroup->addChild(new glcts::ShaderConstExprTests(getContext()));
 		coreGroup->addChild(new glcts::ShaderMacroTests(getContext()));
+		coreGroup->addChild(new glcts::InternalformatTests(getContext()));
 		addChild(coreGroup);
 		addChild(new glcts::ParallelShaderCompileTests(getContext()));
+		addChild(new glcts::PackedPixelsTests(getContext()));
+		addChild(new glcts::PackedDepthStencilTests(getContext()));
+		addChild(new es3cts::CopyTexImageConversionsTests(getContext()));
 	}
 	catch (...)
 	{

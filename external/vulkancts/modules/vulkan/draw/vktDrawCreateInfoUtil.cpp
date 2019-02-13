@@ -713,6 +713,20 @@ PipelineCreateInfo::VertexInputState::VertexInputState (deUint32										_verte
 	pVertexAttributeDescriptions	= _pVertexAttributeDescriptions;
 }
 
+PipelineCreateInfo::VertexInputState& PipelineCreateInfo::VertexInputState::addDivisors (deUint32												_vertexBindingDivisorCount,
+																						 const vk::VkVertexInputBindingDivisorDescriptionEXT*	_pVertexBindingDivisors)
+{
+	m_divisorState.sType = vk::VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT;
+	m_divisorState.vertexBindingDivisorCount = _vertexBindingDivisorCount;
+	m_divisorState.pVertexBindingDivisors = _pVertexBindingDivisors;
+
+	// Link it into the chainadd
+	m_divisorState.pNext = this->pNext;
+	pNext = &m_divisorState;
+
+	return *this;
+}
+
 PipelineCreateInfo::InputAssemblerState::InputAssemblerState (vk::VkPrimitiveTopology	_topology,
 															  vk::VkBool32				_primitiveRestartEnable)
 {
@@ -998,9 +1012,22 @@ PipelineCreateInfo::DynamicState::DynamicState (const std::vector<vk::VkDynamicS
 
 	if (!_dynamicStates.size())
 	{
-		for (size_t i = 0; i < vk::VK_DYNAMIC_STATE_LAST; ++i)
+		const vk::VkDynamicState dynamicState[] =
 		{
-			m_dynamicStates.push_back(static_cast<vk::VkDynamicState>(i));
+			vk::VK_DYNAMIC_STATE_VIEWPORT,
+			vk::VK_DYNAMIC_STATE_SCISSOR,
+			vk::VK_DYNAMIC_STATE_LINE_WIDTH,
+			vk::VK_DYNAMIC_STATE_DEPTH_BIAS,
+			vk::VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+			vk::VK_DYNAMIC_STATE_DEPTH_BOUNDS,
+			vk::VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+			vk::VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+			vk::VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+		};
+
+		for (size_t i = 0; i < DE_LENGTH_OF_ARRAY(dynamicState); ++i)
+		{
+			m_dynamicStates.push_back(dynamicState[i]);
 		}
 	}
 	else

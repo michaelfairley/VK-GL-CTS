@@ -24,6 +24,8 @@
 #include "vktSparseResourcesTests.hpp"
 #include "vktSparseResourcesImageSparseBinding.hpp"
 #include "vktSparseResourcesImageSparseResidency.hpp"
+#include "vktSparseResourcesImageAlignedMipSize.hpp"
+#include "vktSparseResourcesImageBlockShapes.hpp"
 #include "vktSparseResourcesMipmapSparseResidency.hpp"
 #include "vktSparseResourcesImageMemoryAliasing.hpp"
 #include "vktSparseResourcesShaderIntrinsics.hpp"
@@ -40,13 +42,19 @@ tcu::TestCaseGroup* createTests (tcu::TestContext& testCtx)
 {
 	de::MovePtr<tcu::TestCaseGroup> sparseTests (new tcu::TestCaseGroup(testCtx, "sparse_resources", "Sparse Resources Tests"));
 
-	sparseTests->addChild(createSparseBufferTests					(testCtx));
-	sparseTests->addChild(createImageSparseBindingTests				(testCtx));
-	sparseTests->addChild(createImageSparseResidencyTests			(testCtx));
-	sparseTests->addChild(createMipmapSparseResidencyTests			(testCtx));
-	sparseTests->addChild(createImageSparseMemoryAliasingTests		(testCtx));
-	sparseTests->addChild(createSparseResourcesShaderIntrinsicsTests(testCtx));
-	sparseTests->addChild(createQueueBindSparseTests				(testCtx));
+	sparseTests->addChild(createSparseBufferTests							(testCtx));
+	sparseTests->addChild(createImageSparseBindingTests						(testCtx));
+	sparseTests->addChild(createDeviceGroupImageSparseBindingTests			(testCtx));
+	sparseTests->addChild(createImageSparseResidencyTests					(testCtx));
+	sparseTests->addChild(createImageAlignedMipSizeTests					(testCtx));
+	sparseTests->addChild(createImageBlockShapesTests						(testCtx));
+	sparseTests->addChild(createDeviceGroupImageSparseResidencyTests		(testCtx));
+	sparseTests->addChild(createMipmapSparseResidencyTests					(testCtx));
+	sparseTests->addChild(createDeviceGroupMipmapSparseResidencyTests		(testCtx));
+	sparseTests->addChild(createImageSparseMemoryAliasingTests				(testCtx));
+	sparseTests->addChild(createDeviceGroupImageSparseMemoryAliasingTests	(testCtx));
+	sparseTests->addChild(createSparseResourcesShaderIntrinsicsTests		(testCtx));
+	sparseTests->addChild(createQueueBindSparseTests						(testCtx));
 
 	return sparseTests.release();
 }

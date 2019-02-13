@@ -33,8 +33,10 @@
 #include "vkPlatform.hpp"
 #include "vkPrograms.hpp"
 #include "vkMemUtil.hpp"
+#include "vkBarrierUtil.hpp"
 #include "vkBuilderUtil.hpp"
 #include "vkImageUtil.hpp"
+#include "vkCmdUtil.hpp"
 
 #include "deUniquePtr.hpp"
 #include "deStringUtil.hpp"
@@ -109,7 +111,7 @@ inline VkImageCreateInfo makeImageCreateInfo (const Texture& texture, const VkFo
 //! Interpret the memory as IVec3
 inline tcu::IVec3 readIVec3 (const void* const data)
 {
-	const int* const p = reinterpret_cast<const int* const>(data);
+	const int* const p = reinterpret_cast<const int*>(data);
 	return tcu::IVec3(p[0], p[1], p[2]);
 }
 
@@ -322,7 +324,7 @@ tcu::TestStatus SizeTestInstance::iterate (void)
 	// Compare the result.
 
 	const Allocation& bufferAlloc = m_resultBuffer->getAllocation();
-	invalidateMappedMemoryRange(vk, device, bufferAlloc.getMemory(), bufferAlloc.getOffset(), m_resultBufferSizeBytes);
+	invalidateAlloc(vk, device, bufferAlloc);
 
 	const tcu::IVec3 resultSize = readIVec3(bufferAlloc.getHostPtr());
 	const tcu::IVec3 expectedSize = getExpectedImageSizeResult(m_texture);
